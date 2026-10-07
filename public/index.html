@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ByteForge Hardware — Cadastro de Cliente</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  /* ---------- estilos exclusivos desta página (vídeos de fundo / easter eggs) ---------- */
+  .video-wall{
+    position:fixed;inset:0;display:flex;z-index:0;opacity:0;pointer-events:none;
+    transition:opacity 0.8s ease;
+  }
+  .video-container{width:33.33%;height:100%;overflow:hidden;background:#000;}
+  .video-container video{width:100%;height:100%;object-fit:cover;}
+  .overlay{position:fixed;inset:0;background:rgba(10,5,20,0.6);z-index:1;pointer-events:none;opacity:0;transition:opacity 0.8s ease;}
+
+  body{transition:background 0.6s ease;}
+
+  body.aura-mode .hint, body.bora-mode .hint{ color:#cbd5e1; }
+  body.aura-mode .link{ color:#e9d5ff; }
+  body.bora-mode .link{ color:#fde68a; }
+  body.aura-mode .field input::placeholder, body.bora-mode .field input::placeholder{ color:rgba(255,255,255,.45); }
+  body.aura-mode select option, body.bora-mode select option{ background:#1a1128; color:#fff; }
+
+  /* ---- easter egg 1: "aura" na senha ---- */
+  body.aura-mode{background:#05020a;}
+  body.aura-mode .aura-wall,
+  body.aura-mode .overlay{ opacity:1; }
+  body.aura-mode .clinic-panel{ opacity:0; }
+  body.aura-mode .card{
+    background:rgba(20,10,35,0.35);
+    border-color:rgba(168,85,247,0.45);
+    box-shadow:0 0 50px rgba(168,85,247,0.35);
+  }
+  body.aura-mode .brand-title{
+    background:linear-gradient(45deg,#e9d5ff,#a855f7,#4f46e5);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  body.aura-mode .brand-sub, body.aura-mode label{ color:#cbd5e1; }
+  body.aura-mode .field input, body.aura-mode .field select{
+    background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.2); color:#fff;
+  }
+  body.aura-mode .btn-primary{
+    background:linear-gradient(135deg,#a855f7 0%,#7c3aed 100%);color:#fff;
+    box-shadow:0 4px 20px rgba(124,58,237,0.4);
+  }
+  body.aura-mode .pulse-line path{ stroke:#c084fc; }
+
+  /* ---- easter egg 2: "bora toma uma" no nome ---- */
+  body.bora-mode{background:#160a02;}
+  body.bora-mode .bora-wall,
+  body.bora-mode .overlay{ opacity:1; }
+  body.bora-mode .clinic-panel{ opacity:0; }
+  body.bora-mode .card{
+    background:rgba(35,16,5,0.4);
+    border-color:rgba(245,158,11,0.5);
+    box-shadow:0 0 50px rgba(245,158,11,0.35);
+  }
+  body.bora-mode .brand-title{
+    background:linear-gradient(45deg,#fde68a,#f59e0b,#dc2626);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  body.bora-mode .brand-sub, body.bora-mode label{ color:#fcd9b8; }
+  body.bora-mode .field input, body.bora-mode .field select{
+    background:rgba(255,255,255,0.08); border-color:rgba(255,180,100,0.25); color:#fff;
+  }
+  body.bora-mode .btn-primary{
+    background:linear-gradient(135deg,#f59e0b 0%,#dc2626 100%);color:#fff;
+    box-shadow:0 4px 20px rgba(220,38,38,0.4);
+  }
+  body.bora-mode .pulse-line path{ stroke:#fbbf24; }
+</style>
+</head>
+<body class="center">
+
+  <div class="video-wall aura-wall">
+    <div class="video-container"><video autoplay loop muted playsinline><source src="download.mp4" type="video/mp4"></video></div>
+    <div class="video-container"><video autoplay loop muted playsinline><source src="download.mp4" type="video/mp4"></video></div>
+    <div class="video-container"><video autoplay loop muted playsinline><source src="download.mp4" type="video/mp4"></video></div>
+  </div>
+  <div class="video-wall bora-wall">
+    <div class="video-container"><video autoplay loop muted playsinline><source src="video2.mp4" type="video/mp4"></video></div>
+    <div class="video-container"><video autoplay loop muted playsinline><source src="video2.mp4" type="video/mp4"></video></div>
+    <div class="video-container"><video autoplay loop muted playsinline><source src="video2.mp4" type="video/mp4"></video></div>
+  </div>
+  <div class="overlay"></div>
+  <audio id="bg-music-aura" loop>
+    <source src="music.mp3" type="audio/mpeg">
+  </audio>
+  <audio id="bg-music-bora" loop>
+    <source src="music2.mp3" type="audio/mpeg">
+  </audio>
+
+  <div class="shell">
+    <aside class="clinic-panel">
+      <div class="clinic-mark">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="7" y="7" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M9 3v3M12 3v3M15 3v3M9 18v3M12 18v3M15 18v3M3 9h3M3 12h3M3 15h3M18 9h3M18 12h3M18 15h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        ByteForge Hardware
+      </div>
+      <div class="pulse-wrap">
+        <svg class="pulse-line" viewBox="0 0 340 56" xmlns="http://www.w3.org/2000/svg">
+          <path d="M0,28 L60,28 L74,6 L92,50 L108,28 L150,28 L164,14 L178,42 L192,28 L340,28"></path>
+        </svg>
+      </div>
+      <div class="clinic-note">CLIENTE VIP<br>CADASTRE-SE E GANHE 5% OFF<br>NA PRIMEIRA COMPRA.</div>
+    </aside>
+
+    <div class="card">
+      <h2 class="brand-title">Cadastro de Cliente</h2>
+      <p class="brand-sub">ByteForge Hardware — Peças e Montagem de PC</p>
+
+      <form onsubmit="enviarCadastro(event)" class="form-grid">
+        <div class="field full-width">
+          <label for="nome">Nome completo</label>
+          <input type="text" id="nome" required placeholder="Seu nome">
+        </div>
+
+        <div class="field">
+          <label for="cpf">CPF</label>
+          <input type="text" id="cpf" required placeholder="000.000.000-00" inputmode="numeric" maxlength="14">
+        </div>
+
+        <div class="field">
+          <label for="nascimento">Data de nascimento</label>
+          <input type="date" id="nascimento" required>
+        </div>
+
+        <div class="field full-width">
+          <label for="cep">CEP</label>
+          <input type="text" id="cep" required placeholder="00000-000" inputmode="numeric" maxlength="9">
+          <p class="hint inline">Digite o CEP e o endereço é preenchido automaticamente.</p>
+        </div>
+
+        <div class="field">
+          <label for="bairro">Bairro</label>
+          <input type="text" id="bairro" required placeholder="Bairro">
+        </div>
+
+        <div class="field">
+          <label for="numero">Número</label>
+          <input type="text" id="numero" required placeholder="123">
+        </div>
+
+        <div class="field full-width">
+          <label for="rua">Rua / Logradouro</label>
+          <input type="text" id="rua" required placeholder="Av / Rua...">
+        </div>
+
+        <div class="field">
+          <label for="uf">UF</label>
+          <select id="uf" required>
+            <option value="" disabled selected>Selecione</option>
+            <option value="AC">AC</option><option value="AL">AL</option><option value="AM">AM</option>
+            <option value="AP">AP</option><option value="BA">BA</option><option value="CE">CE</option>
+            <option value="DF">DF</option><option value="ES">ES</option><option value="GO">GO</option>
+            <option value="MA">MA</option><option value="MG">MG</option><option value="MS">MS</option>
+            <option value="MT">MT</option><option value="PA">PA</option><option value="PB">PB</option>
+            <option value="PE">PE</option><option value="PI">PI</option><option value="PR">PR</option>
+            <option value="RJ">RJ</option><option value="RN">RN</option><option value="RO">RO</option>
+            <option value="RR">RR</option><option value="RS">RS</option><option value="SC">SC</option>
+            <option value="SE">SE</option><option value="SP">SP</option><option value="TO">TO</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="cidade">Cidade</label>
+          <select id="cidade" required disabled>
+            <option value="" disabled selected>Selecione a UF primeiro</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="celular">Celular</label>
+          <input type="tel" id="celular" required placeholder="(11) 99999-0000" maxlength="15">
+        </div>
+
+        <div class="field">
+          <label for="email">E-mail</label>
+          <input type="email" id="email" required placeholder="seu@email.com">
+        </div>
+
+        <div class="field full-width">
+          <label for="senha">Senha da conta</label>
+          <input type="password" id="senha" required placeholder="••••••••••••" minlength="4">
+        </div>
+
+        <div id="msg" class="msg"></div>
+
+        <button type="submit" class="btn btn-primary btn-submit">CRIAR CONTA</button>
+        <p class="hint">Já tem conta? <a class="link" href="login.html">Entrar</a></p>
+      </form>
+    </div>
+  </div>
+
+  <script src="endereco.js"></script>
+  <script>
+    // ---------- máscaras ----------
+    document.getElementById('cpf').addEventListener('input', e => {
+      let v = e.target.value.replace(/\D/g, '').slice(0, 11);
+      v = v.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+      e.target.value = v;
+    });
+    document.getElementById('celular').addEventListener('input', e => {
+      let v = e.target.value.replace(/\D/g, '').slice(0, 11);
+      if (v.length > 6) v = `(${v.slice(0,2)}) ${v.slice(2, v.length === 11 ? 7 : 6)}-${v.slice(v.length === 11 ? 7 : 6)}`;
+      else if (v.length > 2) v = `(${v.slice(0,2)}) ${v.slice(2)}`;
+      e.target.value = v;
+    });
+
+    // ---------- easter eggs ----------
+    // 1) digitar "aura" na senha           -> vídeo/música originais
+    // 2) digitar "bora toma uma" no nome   -> vídeo2/música2
+    const nomeInput  = document.getElementById('nome');
+    const senhaInput = document.getElementById('senha');
+    const musicaAura = document.getElementById('bg-music-aura');
+    const musicaBora = document.getElementById('bg-music-bora');
+    let auraAtiva = false;
+    let boraAtiva = false;
+
+    function aplicarModo() {
+      const titulo = document.querySelector('.brand-title');
+
+      if (boraAtiva) {
+        document.body.classList.remove('aura-mode');
+        document.body.classList.add('bora-mode');
+        titulo.textContent = 'bora tomar uma? 🍻';
+        musicaAura.pause();
+        musicaBora.play().catch(() => {});
+      } else if (auraAtiva) {
+        document.body.classList.remove('bora-mode');
+        document.body.classList.add('aura-mode');
+        titulo.textContent = 'cadastrar farmador de aura ✨';
+        musicaBora.pause();
+        musicaAura.play().catch(() => {});
+      } else {
+        document.body.classList.remove('aura-mode', 'bora-mode');
+        titulo.textContent = 'Cadastro de Cliente';
+        musicaAura.pause();
+        musicaBora.pause();
+      }
+    }
+
+    senhaInput.addEventListener('input', () => {
+      auraAtiva = senhaInput.value.toLowerCase().includes('aura');
+      aplicarModo();
+    });
+    nomeInput.addEventListener('input', () => {
+      boraAtiva = nomeInput.value.toLowerCase().includes('bora toma uma');
+      aplicarModo();
+    });
+
+    // ---------- envio ----------
+    function mostrarMsg(texto, tipo) {
+      const msg = document.getElementById('msg');
+      msg.textContent = texto;
+      msg.className = 'msg show ' + tipo;
+    }
+
+    async function enviarCadastro(event) {
+      event.preventDefault();
+      const ids = ['nome','cpf','cep','nascimento','rua','numero','bairro','cidade','uf','email','celular','senha'];
+      const dados = {};
+      ids.forEach(id => dados[id] = document.getElementById(id).value);
+
+      try {
+        const resposta = await fetch('/cliente', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dados)
+        });
+        const corpo = await resposta.json().catch(() => ({}));
+
+        if (!resposta.ok) {
+          mostrarMsg(corpo.erro || 'Erro ao cadastrar.', 'erro');
+          return;
+        }
+        mostrarMsg('Cadastro realizado! Redirecionando para o login...', 'ok');
+        setTimeout(() => { window.location.href = 'login.html'; }, 1200);
+      } catch (error) {
+        mostrarMsg('Erro ao cadastrar: ' + error.message, 'erro');
+      }
+    }
+  </script>
+</body>
+</html>

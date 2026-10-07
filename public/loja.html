@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loja — ByteForge Hardware</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <span class="logo">ByteForge Loja</span>
+    <nav>
+      <button class="tab active" data-tab="vitrine">Vitrine</button>
+      <button class="tab" data-tab="minha">Minha loja</button>
+      <a href="perfil.html"><button class="tab">Perfil</button></a>
+      <button class="tab" onclick="sair()">Sair</button>
+    </nav>
+  </header>
+
+  <main class="container">
+
+    <!-- ============ VITRINE ============ -->
+    <section id="vitrine" class="panel active">
+      <div class="toolbar">
+        <input type="text" id="busca" placeholder="Buscar produto ou loja...">
+        <button class="btn small" onclick="carregarVitrine()">Buscar</button>
+      </div>
+      <div id="listaProdutos" class="grid"></div>
+    </section>
+
+    <!-- ============ MINHA LOJA ============ -->
+    <section id="minha" class="panel">
+
+      <!-- Sem loja: opção de criar -->
+      <div id="semLoja" class="box" style="display:none; max-width:520px; margin:0 auto;">
+        <h3>Crie sua loja</h3>
+        <p class="brand-sub">Você ainda não tem uma loja. Crie uma para começar a vender seus produtos.</p>
+        <form onsubmit="criarLoja(event)">
+          <div class="form-group">
+            <label for="lojaNome">Nome da loja</label>
+            <input type="text" id="lojaNome" required maxlength="100" placeholder="Ex: Maria Informática">
+          </div>
+          <div class="form-group">
+            <label for="lojaDesc">Descrição</label>
+            <textarea id="lojaDesc" rows="3" maxlength="255" placeholder="O que sua loja vende?"></textarea>
+          </div>
+          <button class="btn" type="submit">CRIAR LOJA</button>
+          <div id="msgLoja" class="msg"></div>
+        </form>
+      </div>
+
+      <!-- Com loja: gerenciamento -->
+      <div id="comLoja" style="display:none">
+        <div class="box">
+          <h3 id="tituloLoja"></h3>
+          <p id="descLoja" style="color:var(--muted);font-size:0.9rem"></p>
+        </div>
+
+        <div class="box">
+          <h3>Adicionar produto</h3>
+          <form onsubmit="addProduto(event)">
+            <div class="form-group" style="margin-top:0.8rem">
+              <label for="pNome">Nome</label>
+              <input type="text" id="pNome" required maxlength="120" placeholder="Ex: Placa de vídeo RTX 4060">
+            </div>
+            <div class="form-group">
+              <label for="pDesc">Descrição</label>
+              <input type="text" id="pDesc" maxlength="255">
+            </div>
+            <div class="row">
+              <div class="form-group">
+                <label for="pPreco">Preço (R$)</label>
+                <input type="number" id="pPreco" required min="0" step="0.01" placeholder="0,00">
+              </div>
+              <div class="form-group">
+                <label for="pEstoque">Estoque</label>
+                <input type="number" id="pEstoque" min="0" step="1" value="1">
+              </div>
+            </div>
+            <button class="btn" type="submit">ADICIONAR PRODUTO</button>
+            <div id="msgProd" class="msg"></div>
+          </form>
+        </div>
+
+        <h3 style="font-family:var(--font-title);color:var(--text);margin-bottom:0.8rem">Meus produtos</h3>
+        <div id="meusProdutos" class="grid"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const token = localStorage.getItem('token');
+    if (!token) window.location.href = 'login.html';
+
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    const moeda = v => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+    function sair() {
+      localStorage.removeItem('token');
+      localStorage.removeItem('nomeUsuario');
+      window.location.href = 'login.html';
+    }
+
+    async function api(url, opts = {}) {
+      const r = await fetch(url, {
+        ...opts,
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...(opts.headers || {}) }
+      });
+      if (r.status === 401 || r.status === 403) { sair(); throw new Error('Sessão expirada'); }
+      const dados = await r.json().catch(() => ({}));
+      return { ok: r.ok, dados };
+    }
+
+    function mostrar(el, texto, tipo) {
+      el.textContent = texto;
+      el.className = 'msg ' + tipo;
+    }
+
+    // ---------- abas ----------
+    document.querySelectorAll('.tab[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab[data-tab]').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+        if (btn.dataset.tab === 'minha') carregarMinhaLoja();
+        else carregarVitrine();
+      });
+    });
+    document.getElementById('busca').addEventListener('keydown', e => { if (e.key === 'Enter') carregarVitrine(); });
+
+    // ---------- vitrine ----------
+    async function carregarVitrine() {
+      const busca = document.getElementById('busca').value.trim();
+      const lista = document.getElementById('listaProdutos');
+      try {
+        const r = await fetch('/produtos' + (busca ? '?busca=' + encodeURIComponent(busca) : ''));
+        const produtos = await r.json();
+        if (!produtos.length) {
+          lista.innerHTML = '<p class="vazio" style="grid-column:1/-1">Nenhum produto por aqui ainda. Que tal criar sua loja e ser o primeiro a vender?</p>';
+          return;
+        }
+        lista.innerHTML = produtos.map(p => `
+          <article class="produto">
+            <span class="loja-tag">${esc(p.loja_nome)}</span>
+            <h3>${esc(p.nome)}</h3>
+            <p class="desc">${esc(p.descricao)}</p>
+            <span class="preco">${moeda(p.preco)}</span>
+            <span class="estoque">${p.estoque > 0 ? p.estoque + ' em estoque' : 'Esgotado'}</span>
+          </article>`).join('');
+      } catch (e) {
+        lista.innerHTML = '<p class="vazio" style="grid-column:1/-1">Erro ao carregar produtos.</p>';
+      }
+    }
+
+    // ---------- minha loja ----------
+    async function carregarMinhaLoja() {
+      const { dados } = await api('/loja/minha');
+      const semLoja = document.getElementById('semLoja');
+      const comLoja = document.getElementById('comLoja');
+
+      if (!dados.loja) {
+        semLoja.style.display = 'block';
+        comLoja.style.display = 'none';
+        return;
+      }
+      semLoja.style.display = 'none';
+      comLoja.style.display = 'block';
+      document.getElementById('tituloLoja').textContent = dados.loja.nome;
+      document.getElementById('descLoja').textContent = dados.loja.descricao || 'Sem descrição.';
+      carregarMeusProdutos();
+    }
+
+    async function criarLoja(event) {
+      event.preventDefault();
+      const msg = document.getElementById('msgLoja');
+      const { ok, dados } = await api('/loja', {
+        method: 'POST',
+        body: JSON.stringify({
+          nome: document.getElementById('lojaNome').value,
+          descricao: document.getElementById('lojaDesc').value
+        })
+      });
+      if (!ok) return mostrar(msg, dados.erro || 'Erro ao criar loja.', 'erro');
+      mostrar(msg, 'Loja criada!', 'ok');
+      setTimeout(carregarMinhaLoja, 500);
+    }
+
+    async function carregarMeusProdutos() {
+      const { dados } = await api('/loja/produtos');
+      const lista = document.getElementById('meusProdutos');
+      if (!dados.length) {
+        lista.innerHTML = '<p class="vazio" style="grid-column:1/-1">Você ainda não cadastrou produtos.</p>';
+        return;
+      }
+      lista.innerHTML = dados.map(p => `
+        <article class="produto">
+          <h3>${esc(p.nome)}</h3>
+          <p class="desc">${esc(p.descricao)}</p>
+          <span class="preco">${moeda(p.preco)}</span>
+          <span class="estoque">${p.estoque} em estoque</span>
+          <button class="btn danger small" onclick="removerProduto(${Number(p.id)})">Remover</button>
+        </article>`).join('');
+    }
+
+    async function addProduto(event) {
+      event.preventDefault();
+      const msg = document.getElementById('msgProd');
+      const { ok, dados } = await api('/loja/produtos', {
+        method: 'POST',
+        body: JSON.stringify({
+          nome: document.getElementById('pNome').value,
+          descricao: document.getElementById('pDesc').value,
+          preco: document.getElementById('pPreco').value,
+          estoque: document.getElementById('pEstoque').value
+        })
+      });
+      if (!ok) return mostrar(msg, dados.erro || 'Erro ao adicionar.', 'erro');
+      mostrar(msg, 'Produto adicionado!', 'ok');
+      event.target.reset();
+      document.getElementById('pEstoque').value = 1;
+      carregarMeusProdutos();
+    }
+
+    async function removerProduto(id) {
+      if (!confirm('Remover este produto?')) return;
+      await api('/loja/produtos/' + id, { method: 'DELETE' });
+      carregarMeusProdutos();
+    }
+
+    carregarVitrine();
+  </script>
+</body>
+</html>

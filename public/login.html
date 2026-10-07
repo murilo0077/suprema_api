@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — ByteForge Hardware</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="center">
+  <div class="shell single">
+    <aside class="clinic-panel">
+      <div class="clinic-mark">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="7" y="7" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M9 3v3M12 3v3M15 3v3M9 18v3M12 18v3M15 18v3M3 9h3M3 12h3M3 15h3M18 9h3M18 12h3M18 15h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        ByteForge Hardware
+      </div>
+      <div class="pulse-wrap">
+        <svg class="pulse-line" viewBox="0 0 340 56" xmlns="http://www.w3.org/2000/svg">
+          <path d="M0,28 L60,28 L74,6 L92,50 L108,28 L150,28 L164,14 L178,42 L192,28 L340,28"></path>
+        </svg>
+      </div>
+      <div class="clinic-note">ENTRE, CONFIRA A VITRINE<br>E CRIE A SUA PRÓPRIA LOJA.</div>
+    </aside>
+
+    <div class="card">
+      <h2 class="brand-title">Acessar Conta</h2>
+      <p class="brand-sub">Informe suas credenciais</p>
+
+      <form onsubmit="fazerLogin(event)" class="form-grid">
+        <div class="field full-width">
+          <label for="email">E-mail</label>
+          <input type="email" id="email" required placeholder="seu@email.com">
+        </div>
+        <div class="field full-width">
+          <label for="senha">Senha</label>
+          <input type="password" id="senha" required placeholder="••••••••">
+        </div>
+
+        <div id="msg" class="msg"></div>
+
+        <button type="submit" class="btn btn-primary btn-submit">ENTRAR</button>
+        <p class="hint">Não possui conta? <a class="link" href="index.html">Cadastrar-se</a></p>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    async function fazerLogin(event) {
+      event.preventDefault();
+      const msg = document.getElementById('msg');
+      msg.className = 'msg';
+
+      const email = document.getElementById('email').value;
+      const senha = document.getElementById('senha').value;
+
+      try {
+        const resposta = await fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, senha })
+        });
+        const dados = await resposta.json();
+
+        if (!resposta.ok) {
+          msg.textContent = dados.msg || dados.erro || 'Falha no login.';
+          msg.className = 'msg erro';
+          return;
+        }
+
+        localStorage.setItem('token', dados.token);
+        localStorage.setItem('nomeUsuario', dados.nome);
+
+        msg.textContent = 'Autenticado com sucesso! Abrindo a loja...';
+        msg.className = 'msg ok';
+        setTimeout(() => { window.location.href = 'loja.html'; }, 800);
+      } catch (error) {
+        msg.textContent = 'Erro de conexão com o servidor.';
+        msg.className = 'msg erro';
+      }
+    }
+  </script>
+</body>
+</html>

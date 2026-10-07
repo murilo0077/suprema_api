@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Perfil do Cliente — ByteForge</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="center">
+  <div class="shell single">
+    <aside class="clinic-panel">
+      <div class="clinic-mark">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="7" y="7" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M9 3v3M12 3v3M15 3v3M9 18v3M12 18v3M15 18v3M3 9h3M3 12h3M3 15h3M18 9h3M18 12h3M18 15h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        ByteForge Hardware
+      </div>
+      <div class="pulse-wrap">
+        <svg class="pulse-line" viewBox="0 0 340 56" xmlns="http://www.w3.org/2000/svg">
+          <path d="M0,28 L60,28 L74,6 L92,50 L108,28 L150,28 L164,14 L178,42 L192,28 L340,28"></path>
+        </svg>
+      </div>
+      <div class="clinic-note">SESSÃO PROTEGIDA<br>POR TOKEN JWT.</div>
+    </aside>
+
+    <div class="card">
+      <h2 class="brand-title" id="saudacao">Meu Perfil</h2>
+      <p class="brand-sub">Dados obtidos com autenticação JWT segura</p>
+
+      <div class="info-list" id="dadosContainer">
+        <p class="vazio">Carregando informações...</p>
+      </div>
+
+      <a href="loja.html"><button class="btn btn-primary" type="button">IR PARA A LOJA</button></a>
+      <button class="btn danger" type="button" onclick="sair()">SAIR DA CONTA</button>
+    </div>
+  </div>
+
+  <script>
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    async function carregarPerfil() {
+      const token = localStorage.getItem('token');
+      if (!token) { window.location.href = 'login.html'; return; }
+
+      try {
+        const resposta = await fetch('/cliente/perfil', { headers: { 'Authorization': 'Bearer ' + token } });
+
+        if (resposta.status === 401 || resposta.status === 403) {
+          localStorage.removeItem('token');
+          window.location.href = 'login.html';
+          return;
+        }
+
+        const c = await resposta.json();
+        document.getElementById('saudacao').textContent = `Olá, ${c.nome}!`;
+        const endereco = [c.rua, c.numero, c.bairro, c.cidade, c.uf].filter(Boolean).join(', ');
+
+        document.getElementById('dadosContainer').innerHTML = `
+          <div class="info-item"><span class="label">ID:</span><span class="value">${esc(c.id)}</span></div>
+          <div class="info-item"><span class="label">E-mail:</span><span class="value">${esc(c.email)}</span></div>
+          <div class="info-item"><span class="label">CPF:</span><span class="value">${esc(c.cpf)}</span></div>
+          <div class="info-item"><span class="label">Celular:</span><span class="value">${esc(c.celular) || 'Não informado'}</span></div>
+          <div class="info-item"><span class="label">Endereço:</span><span class="value">${esc(endereco) || 'Não informado'}</span></div>
+        `;
+      } catch (error) {
+        document.getElementById('dadosContainer').innerHTML =
+          '<p class="vazio" style="color:#f87171">Erro ao consultar a API.</p>';
+      }
+    }
+
+    function sair() {
+      localStorage.removeItem('token');
+      localStorage.removeItem('nomeUsuario');
+      window.location.href = 'login.html';
+    }
+
+    carregarPerfil();
+  </script>
+</body>
+</html>
