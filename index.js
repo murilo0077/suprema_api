@@ -127,25 +127,71 @@ app.get("/cliente/perfil", autenticar, async (req, res) => {
 
 // ----------------- LOJA -----------------
 
-// Vitrine pública: todos os produtos de todas as lojas (aceita ?busca=termo)
-app.get("/produtos", async (req, res) => {
+// Vitrine pública: todos os produtos de todas as lojas
+// Filtros e paginação aceitos via query string:
+//   ?busca=termo                  -> busca por nome do produto (ou loja)
+//   ?ordenar=menor_preco          -> ordena do menor preço para o maior
+//   ?ordenar=maior_preco          -> ordena do maior preço para o menor
+//   ?categoria=processador        -> filtra pela categoria do produto
+//   ?preco_min=200&preco_max=700  -> filtra pela faixa de preço
+//   ?pagina=1                     -> página da consulta (10 produtos por página)
+const PRODUTOS_POR_PAGINA = 10;
+
+async function listarProdutos(req, res) {
     try {
         const busca = (req.query.busca || '').trim();
-        let sql = `SELECT p.id, p.nome, p.descricao, p.preco, p.estoque,
+        const categoria = (req.query.categoria || '').trim();
+        const ordenar = (req.query.ordenar || '').trim();
+        const preco_min = Number(req.query.preco_min);
+        const preco_max = Number(req.query.preco_max);
+        const pagina = Math.max(1, parseInt(req.query.pagina, 10) || 1);
+
+        let sql = `SELECT p.id, p.nome, p.descricao, p.preco, p.estoque, p.categoria,
                           l.id AS loja_id, l.nome AS loja_nome
                    FROM produto p JOIN loja l ON l.id = p.loja_id`;
+        const filtros = [];
         const params = [];
+
         if (busca) {
-            sql += ` WHERE p.nome LIKE ? OR l.nome LIKE ?`;
+            filtros.push(`(p.nome LIKE ? OR l.nome LIKE ?)`);
             params.push(`%${busca}%`, `%${busca}%`);
         }
-        sql += ` ORDER BY p.id DESC`;
+        if (categoria) {
+            filtros.push(`p.categoria = ?`);
+            params.push(categoria);
+        }
+        if (Number.isFinite(preco_min)) {
+            filtros.push(`p.preco >= ?`);
+            params.push(preco_min);
+        }
+        if (Number.isFinite(preco_max)) {
+            filtros.push(`p.preco <= ?`);
+            params.push(preco_max);
+        }
+        if (filtros.length > 0) {
+            sql += ` WHERE ` + filtros.join(` AND `);
+        }
+
+        if (ordenar === 'menor_preco') {
+            sql += ` ORDER BY p.preco ASC`;
+        } else if (ordenar === 'maior_preco') {
+            sql += ` ORDER BY p.preco DESC`;
+        } else {
+            sql += ` ORDER BY p.id DESC`;
+        }
+
+        sql += ` LIMIT ? OFFSET ?`;
+        params.push(PRODUTOS_POR_PAGINA, (pagina - 1) * PRODUTOS_POR_PAGINA);
+
         const [linhas] = await db.pool.query(sql, params);
         res.status(200).json(linhas);
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
-});
+}
+
+app.get("/produtos", listarProdutos);
+app.get("/produto", listarProdutos);
 
 // Lojas existentes (pública)
 app.get("/lojas", async (req, res) => {
@@ -237,6 +283,7 @@ app.post("/loja/produtos", autenticar, async (req, res) => {
     try {
         const nome = (req.body.nome || '').trim();
         const descricao = (req.body.descricao || '').trim();
+        const categoria = (req.body.categoria || '').trim();
         const preco = Number(req.body.preco);
         const estoque = parseInt(req.body.estoque, 10) || 0;
 
@@ -253,8 +300,8 @@ app.post("/loja/produtos", autenticar, async (req, res) => {
         }
 
         const [r] = await db.pool.query(
-            "INSERT INTO produto (loja_id, nome, descricao, preco, estoque) VALUES (?, ?, ?, ?, ?)",
-            [lojas[0].id, nome, descricao || null, preco, estoque]
+            "INSERT INTO produto (loja_id, nome, descricao, categoria, preco, estoque) VALUES (?, ?, ?, ?, ?, ?)",
+            [lojas[0].id, nome, descricao || null, categoria || null, preco, estoque]
         );
         res.status(201).json({ msg: "Produto adicionado!", id: r.insertId });
     } catch (error) {

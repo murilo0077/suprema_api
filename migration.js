@@ -42,6 +42,7 @@ async function criarTabelas() {
                 loja_id INT NOT NULL,
                 nome VARCHAR(120) NOT NULL,
                 descricao VARCHAR(255) NULL,
+                categoria VARCHAR(60) NULL,
                 preco DECIMAL(10,2) NOT NULL,
                 estoque INT NOT NULL DEFAULT 0,
                 criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -49,6 +50,17 @@ async function criarTabelas() {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
         `);
         console.log("✅ Tabela 'produto' criada com sucesso!");
+
+        // Atualiza bancos já criados (adiciona a coluna categoria)
+        try {
+            await db.pool.query(`ALTER TABLE produto ADD COLUMN categoria VARCHAR(60) NULL AFTER descricao`);
+            console.log("✅ Coluna 'categoria' adicionada à tabela 'produto'!");
+        } catch (error) {
+            if (error.code !== 'ER_DUP_FIELDNAME') {
+                throw error;
+            }
+            console.log("ℹ️ Coluna 'categoria' já existe na tabela 'produto'.");
+        }
 
         process.exit(0);
     } catch (error) {
