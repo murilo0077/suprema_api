@@ -142,8 +142,9 @@ async function listarProdutos(req, res) {
         const busca = (req.query.busca || '').trim();
         const categoria = (req.query.categoria || '').trim();
         const ordenar = (req.query.ordenar || '').trim();
-        const preco_min = Number(req.query.preco_min);
-        const preco_max = Number(req.query.preco_max);
+        // Vazio ("?preco_min=") é tratado como não informado
+        const preco_min = req.query.preco_min ? Number(req.query.preco_min) : NaN;
+        const preco_max = req.query.preco_max ? Number(req.query.preco_max) : NaN;
         const pagina = Math.max(1, parseInt(req.query.pagina, 10) || 1);
 
         let sql = `SELECT p.id, p.nome, p.descricao, p.preco, p.estoque, p.categoria,
@@ -173,9 +174,9 @@ async function listarProdutos(req, res) {
         }
 
         if (ordenar === 'menor_preco') {
-            sql += ` ORDER BY p.preco ASC`;
+            sql += ` ORDER BY p.preco ASC, p.id DESC`;
         } else if (ordenar === 'maior_preco') {
-            sql += ` ORDER BY p.preco DESC`;
+            sql += ` ORDER BY p.preco DESC, p.id DESC`;
         } else {
             sql += ` ORDER BY p.id DESC`;
         }
@@ -267,7 +268,7 @@ app.put("/loja/minha", autenticar, async (req, res) => {
 app.get("/loja/produtos", autenticar, async (req, res) => {
     try {
         const [linhas] = await db.pool.query(
-            `SELECT p.id, p.nome, p.descricao, p.preco, p.estoque
+            `SELECT p.id, p.nome, p.descricao, p.categoria, p.preco, p.estoque
              FROM produto p JOIN loja l ON l.id = p.loja_id
              WHERE l.cliente_id = ? ORDER BY p.id DESC`,
             [req.usuario.id]
