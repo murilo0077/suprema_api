@@ -23,7 +23,6 @@ async function criarTabelas() {
         `);
         console.log("✅ Tabela 'cliente' criada com sucesso!");
 
-        // Cada cliente pode ter no máximo UMA loja (cliente_id UNIQUE)
         await db.pool.query(`
             CREATE TABLE IF NOT EXISTS loja (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -45,22 +44,57 @@ async function criarTabelas() {
                 categoria VARCHAR(60) NULL,
                 preco DECIMAL(10,2) NOT NULL,
                 estoque INT NOT NULL DEFAULT 0,
+                imagem_url VARCHAR(2048) NULL,
                 criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (loja_id) REFERENCES loja(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
         `);
         console.log("✅ Tabela 'produto' criada com sucesso!");
 
-        // Atualiza bancos já criados (adiciona a coluna categoria)
         try {
             await db.pool.query(`ALTER TABLE produto ADD COLUMN categoria VARCHAR(60) NULL AFTER descricao`);
             console.log("✅ Coluna 'categoria' adicionada à tabela 'produto'!");
         } catch (error) {
-            if (error.code !== 'ER_DUP_FIELDNAME') {
-                throw error;
-            }
+            if (error.code !== 'ER_DUP_FIELDNAME') throw error;
             console.log("ℹ️ Coluna 'categoria' já existe na tabela 'produto'.");
         }
+
+        try {
+            await db.pool.query(`ALTER TABLE produto ADD COLUMN imagem_url VARCHAR(2048) NULL AFTER estoque`);
+            console.log("✅ Coluna 'imagem_url' adicionada à tabela 'produto'!");
+        } catch (error) {
+            if (error.code !== 'ER_DUP_FIELDNAME') throw error;
+            console.log("ℹ️ Coluna 'imagem_url' já existe na tabela 'produto'.");
+        }
+
+        await db.pool.query(`
+            CREATE TABLE IF NOT EXISTS compra (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                total DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (cliente_id) REFERENCES cliente(id) ON DELETE CASCADE,
+                INDEX idx_compra_cliente (cliente_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        `);
+        console.log("✅ Tabela 'compra' criada com sucesso!");
+
+        await db.pool.query(`
+            CREATE TABLE IF NOT EXISTS compra_item (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                compra_id INT NOT NULL,
+                produto_id INT NOT NULL,
+                nome_produto VARCHAR(120) NOT NULL,
+                preco_unitario DECIMAL(10,2) NOT NULL,
+                quantidade INT NOT NULL,
+                subtotal DECIMAL(10,2) NOT NULL,
+                FOREIGN KEY (compra_id) REFERENCES compra(id) ON DELETE CASCADE,
+                FOREIGN KEY (produto_id) REFERENCES produto(id) ON DELETE RESTRICT,
+                INDEX idx_compra_item_compra (compra_id),
+                INDEX idx_compra_item_produto (produto_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        `);
+        console.log("✅ Tabela 'compra_item' criada com sucesso!");
 
         process.exit(0);
     } catch (error) {

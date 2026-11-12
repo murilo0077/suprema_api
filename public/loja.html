@@ -15,6 +15,7 @@
     <nav>
       <button class="tab active" data-tab="vitrine">Vitrine</button>
       <button class="tab" data-tab="minha">Minha loja</button>
+      <button class="tab" data-tab="compras">Minhas compras</button>
       <a href="perfil.html"><button class="tab">Perfil</button></a>
       <button class="tab" onclick="sair()">Sair</button>
     </nav>
@@ -28,13 +29,24 @@
         <input type="text" id="busca" placeholder="Buscar produto ou loja...">
         <button class="btn small" onclick="carregarVitrine()">Buscar</button>
       </div>
+
+      <div id="carrinhoBox" class="box carrinho" style="display:none">
+        <div class="carrinho-head">
+          <h3>Carrinho</h3>
+          <button class="btn small danger" type="button" onclick="limparCarrinho()">Limpar</button>
+        </div>
+        <div id="carrinhoItens"></div>
+        <div class="carrinho-total">Total: <strong id="carrinhoTotal">R$ 0,00</strong></div>
+        <div id="msgCompra" class="msg"></div>
+        <button class="btn btn-primary" type="button" onclick="finalizarCompra()">FINALIZAR COMPRA</button>
+      </div>
+
       <div id="listaProdutos" class="grid"></div>
     </section>
 
     <!-- ============ MINHA LOJA ============ -->
     <section id="minha" class="panel">
 
-      <!-- Sem loja: opção de criar -->
       <div id="semLoja" class="box" style="display:none; max-width:520px; margin:0 auto;">
         <h3>Crie sua loja</h3>
         <p class="brand-sub">Você ainda não tem uma loja. Crie uma para começar a vender seus produtos.</p>
@@ -52,7 +64,6 @@
         </form>
       </div>
 
-      <!-- Com loja: gerenciamento -->
       <div id="comLoja" style="display:none">
         <div class="box">
           <h3 id="tituloLoja"></h3>
@@ -69,6 +80,10 @@
             <div class="form-group">
               <label for="pDesc">Descrição</label>
               <input type="text" id="pDesc" maxlength="255">
+            </div>
+            <div class="form-group">
+              <label for="pImagem">URL da imagem (Google Drive ou outro link público)</label>
+              <input type="url" id="pImagem" maxlength="2048" placeholder="https://drive.google.com/file/d/.../view">
             </div>
             <div class="row">
               <div class="form-group">
@@ -89,11 +104,23 @@
         <div id="meusProdutos" class="grid"></div>
       </div>
     </section>
+
+    <!-- ============ MINHAS COMPRAS ============ -->
+    <section id="compras" class="panel">
+      <div class="box">
+        <h3>Minhas compras</h3>
+        <p class="brand-sub">Histórico de pedidos do usuário autenticado.</p>
+        <div id="listaCompras"></div>
+      </div>
+    </section>
   </main>
 
   <script>
     const token = localStorage.getItem('token');
     if (!token) window.location.href = 'login.html';
+
+    let produtosVitrine = [];
+    const carrinho = new Map();
 
     function esc(s) {
       return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -129,6 +156,7 @@
         btn.classList.add('active');
         document.getElementById(btn.dataset.tab).classList.add('active');
         if (btn.dataset.tab === 'minha') carregarMinhaLoja();
+        else if (btn.dataset.tab === 'compras') carregarCompras();
         else carregarVitrine();
       });
     });
@@ -141,21 +169,126 @@
       try {
         const r = await fetch('/produtos' + (busca ? '?busca=' + encodeURIComponent(busca) : ''));
         const produtos = await r.json();
+        produtosVitrine = produtos;
+
         if (!produtos.length) {
           lista.innerHTML = '<p class="vazio" style="grid-column:1/-1">Nenhum produto por aqui ainda. Que tal criar sua loja e ser o primeiro a vender?</p>';
           return;
         }
+
         lista.innerHTML = produtos.map(p => `
           <article class="produto">
+            <img class="produto-img" src="/produtos/${p.id}/imagem" alt="${esc(p.nome)}" loading="lazy" onerror="this.style.display='none'">
             <span class="loja-tag">${esc(p.loja_nome)}</span>
             <h3>${esc(p.nome)}</h3>
             <p class="desc">${esc(p.descricao)}</p>
             <span class="preco">${moeda(p.preco)}</span>
             <span class="estoque">${p.estoque > 0 ? p.estoque + ' em estoque' : 'Esgotado'}</span>
+            <div class="comprar">
+              <input class="qtd" id="qtd-${p.id}" type="number" min="1" max="${Math.max(1, Number(p.estoque))}" value="1" ${p.estoque > 0 ? '' : 'disabled'}>
+              <button class="btn small" type="button" onclick="adicionarCarrinho(${p.id})" ${p.estoque > 0 ? '' : 'disabled'}>Adicionar</button>
+            </div>
           </article>`).join('');
       } catch (e) {
         lista.innerHTML = '<p class="vazio" style="grid-column:1/-1">Erro ao carregar produtos.</p>';
       }
+    }
+
+    // ---------- carrinho ----------
+    function renderCarrinho() {
+      const box = document.getElementById('carrinhoBox');
+      const itens = document.getElementById('carrinhoItens');
+      const totalEl = document.getElementById('carrinhoTotal');
+
+      if (carrinho.size === 0) {
+        box.style.display = 'none';
+        itens.innerHTML = '';
+        totalEl.textContent = moeda(0);
+        return;
+      }
+
+      let total = 0;
+      itens.innerHTML = Array.from(carrinho.values()).map(item => {
+        const subtotal = Number(item.preco) * item.quantidade;
+        total += subtotal;
+        return `
+          <div class="carrinho-item">
+            <img class="carrinho-item-img" src="/produtos/${item.id}/imagem" alt="${esc(item.nome)}" loading="lazy" onerror="this.style.display='none'">
+            <div class="carrinho-item-info">
+              <strong>${esc(item.nome)}</strong>
+              <span>${moeda(item.preco)}</span>
+            </div>
+            <input type="number" min="1" max="${Number(item.estoque)}" value="${item.quantidade}" onchange="atualizarQuantidade(${item.id}, this.value)">
+            <span class="preco">${moeda(subtotal)}</span>
+            <button class="btn small danger" type="button" onclick="removerCarrinho(${item.id})">Remover</button>
+          </div>`;
+      }).join('');
+
+      box.style.display = 'block';
+      totalEl.textContent = moeda(total);
+    }
+
+    function adicionarCarrinho(id) {
+      const produto = produtosVitrine.find(p => Number(p.id) === Number(id));
+      if (!produto) return;
+
+      const input = document.getElementById('qtd-' + id);
+      let quantidade = parseInt(input.value, 10);
+      if (!quantidade || quantidade < 1) quantidade = 1;
+
+      const atual = carrinho.get(id) || 0;
+      if (Number(produto.estoque) <= 0) return alert('Produto esgotado.');
+      if (atual + quantidade > Number(produto.estoque)) {
+        return alert(`Quantidade indisponível. Estoque máximo: ${produto.estoque}.`);
+      }
+
+      carrinho.set(id, { ...produto, quantidade: atual + quantidade });
+      renderCarrinho();
+    }
+
+    function atualizarQuantidade(id, valor) {
+      const item = carrinho.get(Number(id));
+      if (!item) return;
+
+      let quantidade = parseInt(valor, 10);
+      if (!quantidade || quantidade < 1) quantidade = 1;
+      if (quantidade > Number(item.estoque)) quantidade = Number(item.estoque);
+
+      item.quantidade = quantidade;
+      renderCarrinho();
+    }
+
+    function removerCarrinho(id) {
+      carrinho.delete(Number(id));
+      renderCarrinho();
+    }
+
+    function limparCarrinho() {
+      carrinho.clear();
+      renderCarrinho();
+    }
+
+    async function finalizarCompra() {
+      const msg = document.getElementById('msgCompra');
+      if (carrinho.size === 0) return mostrar(msg, 'Adicione produtos ao carrinho.', 'erro');
+
+      const itens = Array.from(carrinho.values()).map(item => ({
+        produto_id: item.id,
+        quantidade: item.quantidade
+      }));
+
+      const { ok, dados } = await api('/compras', {
+        method: 'POST',
+        body: JSON.stringify({ itens })
+      });
+
+      if (!ok) return mostrar(msg, dados.erro || 'Erro ao finalizar a compra.', 'erro');
+
+      mostrar(msg, 'Compra realizada com sucesso!', 'ok');
+      carrinho.clear();
+      renderCarrinho();
+      carregarVitrine();
+      carregarCompras();
     }
 
     // ---------- minha loja ----------
@@ -200,11 +333,12 @@
       }
       lista.innerHTML = dados.map(p => `
         <article class="produto">
+          <img class="produto-img" src="/produtos/${p.id}/imagem" alt="${esc(p.nome)}" loading="lazy" onerror="this.style.display='none'">
           <h3>${esc(p.nome)}</h3>
           <p class="desc">${esc(p.descricao)}</p>
           <span class="preco">${moeda(p.preco)}</span>
           <span class="estoque">${p.estoque} em estoque</span>
-          <button class="btn danger small" onclick="removerProduto(${Number(p.id)})">Remover</button>
+          <button class="btn danger small" type="button" onclick="removerProduto(${Number(p.id)})">Remover</button>
         </article>`).join('');
     }
 
@@ -217,7 +351,8 @@
           nome: document.getElementById('pNome').value,
           descricao: document.getElementById('pDesc').value,
           preco: document.getElementById('pPreco').value,
-          estoque: document.getElementById('pEstoque').value
+          estoque: document.getElementById('pEstoque').value,
+          imagem_url: document.getElementById('pImagem').value.trim()
         })
       });
       if (!ok) return mostrar(msg, dados.erro || 'Erro ao adicionar.', 'erro');
@@ -233,6 +368,42 @@
       carregarMeusProdutos();
     }
 
+    // ---------- minhas compras ----------
+    async function carregarCompras() {
+      const lista = document.getElementById('listaCompras');
+      const { ok, dados } = await api('/compras');
+
+      if (!ok) {
+        lista.innerHTML = '<p class="vazio">Erro ao carregar as compras.</p>';
+        return;
+      }
+      if (!dados.length) {
+        lista.innerHTML = '<p class="vazio">Você ainda não realizou compras.</p>';
+        return;
+      }
+
+      lista.innerHTML = dados.map(compra => `
+        <div class="compra">
+          <div class="compra-head">
+            <strong>Compra #${compra.id}</strong>
+            <span>${new Date(compra.criado_em).toLocaleString('pt-BR')}</span>
+          </div>
+          <div class="compra-itens">
+            ${compra.itens.map(item => `
+              <div class="compra-item">
+                <img class="compra-item-img" src="${esc(item.imagem)}" alt="${esc(item.nome_produto)}" loading="lazy" onerror="this.style.display='none'">
+                <div class="compra-item-info">
+                  <strong>${esc(item.nome_produto)}</strong>
+                  <span>${item.quantidade}x ${moeda(item.preco_unitario)}</span>
+                </div>
+                <span class="preco">${moeda(item.subtotal)}</span>
+              </div>`).join('')}
+          </div>
+          <div class="compra-total">Total: <strong>${moeda(compra.total)}</strong></div>
+        </div>`).join('');
+    }
+
+    renderCarrinho();
     carregarVitrine();
   </script>
 </body>

@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><script>
+(async () => {
+  const r = await fetch('/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email: "teste_1794491815@exemplo.com", senha: "123456"})});
+  const d = await r.json();
+  localStorage.setItem('token', d.token);
+  localStorage.setItem('nomeUsuario', d.nome);
+  location.href = '/loja.html';
+})();
+</script>
