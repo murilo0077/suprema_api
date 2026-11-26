@@ -198,6 +198,7 @@
     </div>
   </div>
 
+  <script src="api.js"></script>
   <script src="endereco.js"></script>
   <script>
     // ---------- máscaras ----------
@@ -269,7 +270,7 @@
       ids.forEach(id => dados[id] = document.getElementById(id).value);
 
       try {
-        const resposta = await fetch('/cliente', {
+        const resposta = await fetch(API_BASE + '/cliente', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(dados)

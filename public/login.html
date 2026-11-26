@@ -48,7 +48,13 @@
     </div>
   </div>
 
+  <script src="api.js"></script>
   <script>
+    // destino seguro: só páginas locais conhecidas (evita redirecionamento externo)
+    const permitidos = ['loja.html', 'perfil.html', 'index.html'];
+    const param = new URLSearchParams(window.location.search).get('destino');
+    const destino = permitidos.includes(param) ? param : 'loja.html';
+
     async function fazerLogin(event) {
       event.preventDefault();
       const msg = document.getElementById('msg');
@@ -58,7 +64,7 @@
       const senha = document.getElementById('senha').value;
 
       try {
-        const resposta = await fetch('/login', {
+        const resposta = await fetch(API_BASE + '/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, senha })
@@ -76,7 +82,7 @@
 
         msg.textContent = 'Autenticado com sucesso! Abrindo a loja...';
         msg.className = 'msg ok';
-        setTimeout(() => { window.location.href = 'loja.html'; }, 800);
+        setTimeout(() => { window.location.href = destino; }, 800);
       } catch (error) {
         msg.textContent = 'Erro de conexão com o servidor.';
         msg.className = 'msg erro';

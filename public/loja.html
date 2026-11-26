@@ -14,10 +14,13 @@
     <span class="logo">ByteForge Loja</span>
     <nav>
       <button class="tab active" data-tab="vitrine">Vitrine</button>
-      <button class="tab" data-tab="minha">Minha loja</button>
-      <button class="tab" data-tab="compras">Minhas compras</button>
-      <a href="perfil.html"><button class="tab">Perfil</button></a>
-      <button class="tab" onclick="sair()">Sair</button>
+      <button class="tab logado" data-tab="minha">Minha loja</button>
+      <button class="tab logado" data-tab="compras">Minhas compras</button>
+      <a class="logado" href="perfil.html"><button class="tab">Perfil</button></a>
+      <a class="visitante" href="index.html"><button class="tab">Cadastrar-se</button></a>
+      <a class="visitante" href="login.html?destino=loja.html"><button class="tab">Entrar</button></a>
+      <button class="tab logado" onclick="sair()">Sair</button>
+      <span class="cart-badge" id="cartBadge" title="Itens no carrinho"></span>
     </nav>
   </header>
 
@@ -26,9 +29,19 @@
     <!-- ============ VITRINE ============ -->
     <section id="vitrine" class="panel active">
       <div class="toolbar">
-        <input type="text" id="busca" placeholder="Buscar produto ou loja...">
+        <input type="text" id="busca" placeholder="Buscar produto ou loja..." onkeydown="if(event.key==='Enter')carregarVitrine()">
+        <select id="filtroCategoria" onchange="carregarVitrine()"><option value="">Todas as categorias</option></select>
+        <select id="filtroLoja" onchange="carregarVitrine()"><option value="">Todas as lojas</option></select>
+        <input type="number" id="precoMin" placeholder="Preço mín." min="0" step="0.01" onchange="carregarVitrine()">
+        <input type="number" id="precoMax" placeholder="Preço máx." min="0" step="0.01" onchange="carregarVitrine()">
+        <select id="ordenar" onchange="carregarVitrine()">
+          <option value="">Mais recentes</option>
+          <option value="menor_preco">Menor preço</option>
+          <option value="maior_preco">Maior preço</option>
+        </select>
         <button class="btn small" onclick="carregarVitrine()">Buscar</button>
       </div>
+      <div id="paginacao" class="paginacao"></div>
 
       <div id="carrinhoBox" class="box carrinho" style="display:none">
         <div class="carrinho-head">
@@ -82,6 +95,10 @@
               <input type="text" id="pDesc" maxlength="255">
             </div>
             <div class="form-group">
+              <label for="pCategoria">Categoria</label>
+              <input type="text" id="pCategoria" maxlength="60" placeholder="Ex: Hardware">
+            </div>
+            <div class="form-group">
               <label for="pImagem">URL da imagem (Google Drive ou outro link público)</label>
               <input type="url" id="pImagem" maxlength="2048" placeholder="https://drive.google.com/file/d/.../view">
             </div>
@@ -115,30 +132,45 @@
     </section>
   </main>
 
+  <script src="api.js"></script>
+  <script src="carrinho.js"></script>
   <script>
-    const token = localStorage.getItem('token');
-    if (!token) window.location.href = 'login.html';
-
+    let token = localStorage.getItem('token');
     let produtosVitrine = [];
-    const carrinho = new Map();
+    let paginaAtual = 1;
+    let totalPaginas = 1;
 
     function esc(s) {
       return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
     const moeda = v => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+    function atualizarAuthUI() {
+      document.querySelectorAll('.logado').forEach(el => el.style.display = token ? '' : 'none');
+      document.querySelectorAll('.visitante').forEach(el => el.style.display = token ? 'none' : '');
+    }
+
+    function exigirLogin() {
+      if (token) return true;
+      alert('Entre na sua conta para continuar. Seu carrinho foi salvo.');
+      window.location.href = 'login.html?destino=' + encodeURIComponent('loja.html');
+      return false;
+    }
+
     function sair() {
       localStorage.removeItem('token');
       localStorage.removeItem('nomeUsuario');
-      window.location.href = 'login.html';
+      token = null;
+      atualizarAuthUI();
+      window.location.href = 'loja.html';
     }
 
     async function api(url, opts = {}) {
-      const r = await fetch(url, {
+      const r = await fetch(API_BASE + url, {
         ...opts,
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...(opts.headers || {}) }
       });
-      if (r.status === 401 || r.status === 403) { sair(); throw new Error('Sessão expirada'); }
+      if ((r.status === 401 || r.status === 403) && token) { sair(); throw new Error('Sessão expirada'); }
       const dados = await r.json().catch(() => ({}));
       return { ok: r.ok, dados };
     }
@@ -151,6 +183,7 @@
     // ---------- abas ----------
     document.querySelectorAll('.tab[data-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
+        if (btn.dataset.tab !== 'vitrine' && !exigirLogin()) return;
         document.querySelectorAll('.tab[data-tab]').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
@@ -160,25 +193,76 @@
         else carregarVitrine();
       });
     });
-    document.getElementById('busca').addEventListener('keydown', e => { if (e.key === 'Enter') carregarVitrine(); });
 
     // ---------- vitrine ----------
-    async function carregarVitrine() {
+    function renderPaginacao() {
+      const el = document.getElementById('paginacao');
+      if (totalPaginas <= 1) { el.innerHTML = ''; return; }
+
+      let html = '';
+      for (let p = 1; p <= totalPaginas; p++) {
+        html += `<button class="tab ${p === paginaAtual ? 'active' : ''}" onclick="carregarVitrine(${p})">${p}</button>`;
+      }
+      el.innerHTML = html;
+    }
+
+    async function carregarFiltros() {
+      try {
+        const [cats, lojas] = await Promise.all([
+          fetch(API_BASE + '/categorias').then(r => r.json()),
+          fetch(API_BASE + '/lojas').then(r => r.json())
+        ]);
+        const catSel = document.getElementById('filtroCategoria');
+        const lojaSel = document.getElementById('filtroLoja');
+        const catAtual = catSel.value;
+        const lojaAtual = lojaSel.value;
+
+        catSel.innerHTML = '<option value="">Todas as categorias</option>' +
+          cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+        lojaSel.innerHTML = '<option value="">Todas as lojas</option>' +
+          lojas.map(l => `<option value="${l.id}">${esc(l.nome)}</option>`).join('');
+
+        catSel.value = catAtual;
+        lojaSel.value = lojaAtual;
+      } catch (e) {
+        /* filtros opcionais: a vitrine continua funcionando */
+      }
+    }
+
+    async function carregarVitrine(pagina = 1) {
+      const params = new URLSearchParams();
       const busca = document.getElementById('busca').value.trim();
+      const categoria = document.getElementById('filtroCategoria').value;
+      const loja = document.getElementById('filtroLoja').value;
+      const precoMin = document.getElementById('precoMin').value;
+      const precoMax = document.getElementById('precoMax').value;
+      const ordenar = document.getElementById('ordenar').value;
+
+      if (busca) params.set('busca', busca);
+      if (categoria) params.set('categoria', categoria);
+      if (loja) params.set('loja', loja);
+      if (precoMin !== '') params.set('preco_min', precoMin);
+      if (precoMax !== '') params.set('preco_max', precoMax);
+      if (ordenar) params.set('ordenar', ordenar);
+      params.set('pagina', pagina);
+
       const lista = document.getElementById('listaProdutos');
       try {
-        const r = await fetch('/produtos' + (busca ? '?busca=' + encodeURIComponent(busca) : ''));
+        const r = await fetch(API_BASE + '/produtos?' + params.toString());
         const produtos = await r.json();
         produtosVitrine = produtos;
+        paginaAtual = Number(r.headers.get('X-Pagina') || pagina);
+        totalPaginas = Number(r.headers.get('X-Total-Pages') || 1);
 
         if (!produtos.length) {
-          lista.innerHTML = '<p class="vazio" style="grid-column:1/-1">Nenhum produto por aqui ainda. Que tal criar sua loja e ser o primeiro a vender?</p>';
+          lista.innerHTML = '<p class="vazio" style="grid-column:1/-1">Nenhum produto encontrado com esses filtros.</p>';
+          renderPaginacao();
           return;
         }
 
         lista.innerHTML = produtos.map(p => `
           <article class="produto">
-            <img class="produto-img" src="/produtos/${p.id}/imagem" alt="${esc(p.nome)}" loading="lazy" onerror="this.style.display='none'">
+            <img class="produto-img" src="${API_BASE}${esc(p.imagem)}" alt="${esc(p.nome)}" loading="lazy" onerror="this.onerror=null;this.src=API_BASE+'/sem-imagem.svg'">
             <span class="loja-tag">${esc(p.loja_nome)}</span>
             <h3>${esc(p.nome)}</h3>
             <p class="desc">${esc(p.descricao)}</p>
@@ -189,31 +273,34 @@
               <button class="btn small" type="button" onclick="adicionarCarrinho(${p.id})" ${p.estoque > 0 ? '' : 'disabled'}>Adicionar</button>
             </div>
           </article>`).join('');
+        renderPaginacao();
       } catch (e) {
         lista.innerHTML = '<p class="vazio" style="grid-column:1/-1">Erro ao carregar produtos.</p>';
       }
     }
 
-    // ---------- carrinho ----------
+    // ---------- carrinho (LocalStorage) ----------
     function renderCarrinho() {
       const box = document.getElementById('carrinhoBox');
       const itens = document.getElementById('carrinhoItens');
       const totalEl = document.getElementById('carrinhoTotal');
+      const badge = document.getElementById('cartBadge');
+      const itensCarrinho = Carrinho.todos();
 
-      if (carrinho.size === 0) {
+      badge.textContent = Carrinho.quantidadeItens() ? `🛒 ${Carrinho.quantidadeItens()}` : '';
+
+      if (itensCarrinho.length === 0) {
         box.style.display = 'none';
         itens.innerHTML = '';
         totalEl.textContent = moeda(0);
         return;
       }
 
-      let total = 0;
-      itens.innerHTML = Array.from(carrinho.values()).map(item => {
+      itens.innerHTML = itensCarrinho.map(item => {
         const subtotal = Number(item.preco) * item.quantidade;
-        total += subtotal;
         return `
           <div class="carrinho-item">
-            <img class="carrinho-item-img" src="/produtos/${item.id}/imagem" alt="${esc(item.nome)}" loading="lazy" onerror="this.style.display='none'">
+            <img class="carrinho-item-img" src="${API_BASE}/produtos/${item.id}/imagem" alt="${esc(item.nome)}" loading="lazy" onerror="this.onerror=null;this.src=API_BASE+'/sem-imagem.svg'">
             <div class="carrinho-item-info">
               <strong>${esc(item.nome)}</strong>
               <span>${moeda(item.preco)}</span>
@@ -225,7 +312,7 @@
       }).join('');
 
       box.style.display = 'block';
-      totalEl.textContent = moeda(total);
+      totalEl.textContent = moeda(Carrinho.total());
     }
 
     function adicionarCarrinho(id) {
@@ -233,62 +320,54 @@
       if (!produto) return;
 
       const input = document.getElementById('qtd-' + id);
-      let quantidade = parseInt(input.value, 10);
-      if (!quantidade || quantidade < 1) quantidade = 1;
+      const quantidade = parseInt(input.value, 10) || 1;
+      const resultado = Carrinho.adicionar(produto, quantidade);
+      if (resultado.erro) return alert(resultado.erro);
 
-      const atual = carrinho.get(id) || 0;
-      if (Number(produto.estoque) <= 0) return alert('Produto esgotado.');
-      if (atual + quantidade > Number(produto.estoque)) {
-        return alert(`Quantidade indisponível. Estoque máximo: ${produto.estoque}.`);
-      }
-
-      carrinho.set(id, { ...produto, quantidade: atual + quantidade });
       renderCarrinho();
     }
 
     function atualizarQuantidade(id, valor) {
-      const item = carrinho.get(Number(id));
-      if (!item) return;
-
-      let quantidade = parseInt(valor, 10);
-      if (!quantidade || quantidade < 1) quantidade = 1;
-      if (quantidade > Number(item.estoque)) quantidade = Number(item.estoque);
-
-      item.quantidade = quantidade;
+      Carrinho.definirQuantidade(id, valor);
       renderCarrinho();
     }
 
     function removerCarrinho(id) {
-      carrinho.delete(Number(id));
+      Carrinho.remover(id);
       renderCarrinho();
     }
 
     function limparCarrinho() {
-      carrinho.clear();
+      Carrinho.limpar();
       renderCarrinho();
     }
 
     async function finalizarCompra() {
       const msg = document.getElementById('msgCompra');
-      if (carrinho.size === 0) return mostrar(msg, 'Adicione produtos ao carrinho.', 'erro');
+      if (Carrinho.todos().length === 0) return mostrar(msg, 'Adicione produtos ao carrinho.', 'erro');
+      if (!exigirLogin()) return;
 
-      const itens = Array.from(carrinho.values()).map(item => ({
+      const itens = Carrinho.todos().map(item => ({
         produto_id: item.id,
         quantidade: item.quantidade
       }));
 
-      const { ok, dados } = await api('/compras', {
-        method: 'POST',
-        body: JSON.stringify({ itens })
-      });
+      try {
+        const { ok, dados } = await api('/compras', {
+          method: 'POST',
+          body: JSON.stringify({ itens })
+        });
 
-      if (!ok) return mostrar(msg, dados.erro || 'Erro ao finalizar a compra.', 'erro');
+        if (!ok) return mostrar(msg, dados.erro || 'Erro ao finalizar a compra.', 'erro');
 
-      mostrar(msg, 'Compra realizada com sucesso!', 'ok');
-      carrinho.clear();
-      renderCarrinho();
-      carregarVitrine();
-      carregarCompras();
+        mostrar(msg, 'Compra realizada com sucesso!', 'ok');
+        Carrinho.limpar();
+        renderCarrinho();
+        carregarVitrine();
+        carregarCompras();
+      } catch (e) {
+        mostrar(msg, e.message, 'erro');
+      }
     }
 
     // ---------- minha loja ----------
@@ -333,7 +412,7 @@
       }
       lista.innerHTML = dados.map(p => `
         <article class="produto">
-          <img class="produto-img" src="/produtos/${p.id}/imagem" alt="${esc(p.nome)}" loading="lazy" onerror="this.style.display='none'">
+          <img class="produto-img" src="${API_BASE}/produtos/${p.id}/imagem" alt="${esc(p.nome)}" loading="lazy" onerror="this.onerror=null;this.src=API_BASE+'/sem-imagem.svg'">
           <h3>${esc(p.nome)}</h3>
           <p class="desc">${esc(p.descricao)}</p>
           <span class="preco">${moeda(p.preco)}</span>
@@ -350,6 +429,7 @@
         body: JSON.stringify({
           nome: document.getElementById('pNome').value,
           descricao: document.getElementById('pDesc').value,
+          categoria: document.getElementById('pCategoria').value,
           preco: document.getElementById('pPreco').value,
           estoque: document.getElementById('pEstoque').value,
           imagem_url: document.getElementById('pImagem').value.trim()
@@ -391,7 +471,7 @@
           <div class="compra-itens">
             ${compra.itens.map(item => `
               <div class="compra-item">
-                <img class="compra-item-img" src="${esc(item.imagem)}" alt="${esc(item.nome_produto)}" loading="lazy" onerror="this.style.display='none'">
+                <img class="compra-item-img" src="${API_BASE}${esc(item.imagem)}" alt="${esc(item.nome_produto)}" loading="lazy" onerror="this.onerror=null;this.src=API_BASE+'/sem-imagem.svg'">
                 <div class="compra-item-info">
                   <strong>${esc(item.nome_produto)}</strong>
                   <span>${item.quantidade}x ${moeda(item.preco_unitario)}</span>
@@ -403,7 +483,9 @@
         </div>`).join('');
     }
 
+    atualizarAuthUI();
     renderCarrinho();
+    carregarFiltros();
     carregarVitrine();
   </script>
 </body>

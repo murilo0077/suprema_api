@@ -1,8 +1,30 @@
+const mysql = require('mysql2/promise');
 const db = require('./db');
+
+async function garantirBanco() {
+    const nome = process.env.DB_NAME || 'lucas_epstein';
+    if (!/^[A-Za-z0-9_]+$/.test(nome)) {
+        throw new Error('DB_NAME contém caracteres inválidos.');
+    }
+
+    const conexao = await mysql.createConnection({
+        host: process.env.DB_HOST || '127.0.0.1',
+        port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
+        user: process.env.DB_USER || 'root',
+        password: process.env.DB_PASSWORD || ''
+    });
+
+    await conexao.query(
+        `CREATE DATABASE IF NOT EXISTS \`${nome}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci`
+    );
+    await conexao.end();
+}
 
 async function criarTabelas() {
     try {
-        console.log("Iniciando a migração do banco de dados...");
+        console.log('Iniciando a migração do banco de dados...');
+        await garantirBanco();
+        console.log("✅ Banco de dados verificado/criado!");
 
         await db.pool.query(`
             CREATE TABLE IF NOT EXISTS cliente (
@@ -16,7 +38,7 @@ async function criarTabelas() {
                 bairro VARCHAR(100) NULL,
                 cidade VARCHAR(100) NULL,
                 uf CHAR(2) NULL,
-                celular VARCHAR(20) NOT NULL,
+                celular VARCHAR(20) NOT NULL DEFAULT '',
                 email VARCHAR(100) NOT NULL UNIQUE,
                 senha VARCHAR(512) NOT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -66,6 +88,10 @@ async function criarTabelas() {
             if (error.code !== 'ER_DUP_FIELDNAME') throw error;
             console.log("ℹ️ Coluna 'imagem_url' já existe na tabela 'produto'.");
         }
+
+        await db.pool.query(`ALTER TABLE produto MODIFY COLUMN imagem_url VARCHAR(2048) NULL`);
+        await db.pool.query(`ALTER TABLE cliente MODIFY COLUMN celular VARCHAR(20) NOT NULL DEFAULT ''`);
+        console.log("✅ Colunas existentes normalizadas!");
 
         await db.pool.query(`
             CREATE TABLE IF NOT EXISTS compra (

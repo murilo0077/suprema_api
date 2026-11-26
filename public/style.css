@@ -116,8 +116,11 @@ form > .btn,.card > .btn,.card > a > .btn{margin-top:.8rem;}
 .container{max-width:980px;margin:0 auto;}
 .panel{display:none;}
 .panel.active{display:block;}
-.toolbar{display:flex;gap:.6rem;margin-bottom:1.2rem;}
-.toolbar input{flex:1;}
+.toolbar{display:flex;gap:.6rem;margin-bottom:.8rem;flex-wrap:wrap;align-items:center;}
+.toolbar input{flex:1 1 160px;min-width:120px;}
+.toolbar select{flex:0 1 180px;width:auto;}
+.paginacao{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem;}
+.cart-badge{font-size:.8rem;font-weight:600;color:var(--accent);white-space:nowrap;}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;}
 .produto{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.1rem;display:flex;flex-direction:column;gap:.35rem;}
 .produto h3{font-size:1rem;font-weight:600;}

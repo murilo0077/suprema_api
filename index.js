@@ -5,15 +5,20 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const http = require('http');
 const https = require('https');
+const path = require('path');
 const db = require('./db');
 
 const app = express();
 const port = process.env.PORT || 3000;
 const PRODUTOS_POR_PAGINA = 10;
+const TAMANHO_MAXIMO_IMAGEM = 12 * 1024 * 1024; // 12 MB
 
 app.use(express.json());
-app.use(cors());
-app.use(express.static('public'));
+app.use(cors({ exposedHeaders: ['X-Total-Count', 'X-Total-Pages', 'X-Pagina'] }));
+
+// A tela principal é a vitrine; cadastro e login continuam em /index.html e /login.html
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'loja.html')));
+app.use(express.static(path.join(__dirname, 'public')));
 
 function autenticar(req, res, next) {
     if (!process.env.JWT_SECRET) {
@@ -56,21 +61,52 @@ function normalizarImagemUrl(valor) {
     }
 }
 
-function urlImagemDireta(valor) {
+function idGoogleDrive(valor) {
     try {
         const url = new URL(valor);
-        if (url.hostname === 'drive.google.com') {
-            const fileId = (url.pathname.match(/\/file\/d\/([^/]+)/) || [])[1]
-                || url.searchParams.get('id');
+        const hosts = ['drive.google.com', 'docs.google.com', 'drive.usercontent.google.com'];
+        if (!hosts.includes(url.hostname)) return null;
 
-            if (fileId) {
-                return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`;
-            }
-        }
-        return valor;
+        const trecho = url.pathname.match(/\/(?:file\/d|open|uc|download)\/([^/?#]+)/);
+        const id = (trecho && trecho[1]) || url.searchParams.get('id');
+        return id && /^[\w-]+$/.test(id) ? id : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function urlImagemDireta(valor) {
+    const id = idGoogleDrive(valor);
+    if (id) {
+        // link público de download direto do Drive (o /uc?export=view retorna HTML em muitos casos)
+        return `https://drive.usercontent.google.com/download?id=${encodeURIComponent(id)}&export=view&authuser=0`;
+    }
+    return valor;
+}
+
+function urlComConfirmacao(valor) {
+    try {
+        const url = new URL(valor);
+        url.searchParams.set('confirm', 't');
+        return url.toString();
     } catch (error) {
         return valor;
     }
+}
+
+function imagemPadrao(nome) {
+    const texto = String(nome || 'Sem imagem')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[<>&"']/g, ' ')
+        .slice(0, 30);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400">
+  <rect width="600" height="400" fill="#e5e7eb"/>
+  <rect x="120" y="120" width="360" height="160" rx="12" fill="#cbd5e1"/>
+  <circle cx="230" cy="175" r="24" fill="#94a3b8"/>
+  <path d="M150 255l80-80 55 55 45-40 120 65z" fill="#94a3b8"/>
+  <text x="300" y="330" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#475569">${texto}</text>
+</svg>`;
+    return Buffer.from(svg);
 }
 
 function buscarImagem(url, redirecionamentos = 0) {
@@ -103,7 +139,15 @@ function buscarImagem(url, redirecionamentos = 0) {
             }
 
             const partes = [];
-            resposta.on('data', (parte) => partes.push(parte));
+            let tamanho = 0;
+            resposta.on('data', (parte) => {
+                tamanho += parte.length;
+                if (tamanho > TAMANHO_MAXIMO_IMAGEM) {
+                    requisicao.destroy(new Error('Imagem muito grande'));
+                    return;
+                }
+                partes.push(parte);
+            });
             resposta.on('error', reject);
             resposta.on('end', () => resolve({
                 status,
@@ -119,10 +163,25 @@ function buscarImagem(url, redirecionamentos = 0) {
 
 app.post("/cliente", async (req, res) => {
     try {
-        const cliente = req.body;
+        const cliente = req.body || {};
 
         if (!cliente.email || !cliente.senha || !cliente.cpf || !cliente.nome) {
             return res.status(400).json({ erro: "Nome, CPF, e-mail e senha são obrigatórios." });
+        }
+        if (String(cliente.senha).length < 4) {
+            return res.status(400).json({ erro: "A senha deve ter pelo menos 4 caracteres." });
+        }
+        if (String(cliente.cpf).replace(/\D/g, '').length !== 11) {
+            return res.status(400).json({ erro: "Informe um CPF com 11 dígitos." });
+        }
+
+        const email = String(cliente.email).trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return res.status(400).json({ erro: "E-mail inválido." });
+        }
+
+        if (cliente.nascimento && Number.isNaN(new Date(cliente.nascimento).getTime())) {
+            return res.status(400).json({ erro: "Data de nascimento inválida." });
         }
 
         const senhaCript = await bcrypt.hash(cliente.senha, 10);
@@ -142,7 +201,7 @@ app.post("/cliente", async (req, res) => {
                 cliente.cidade || null,
                 cliente.uf || null,
                 cliente.celular || '',
-                cliente.email,
+                email,
                 senhaCript
             ]
         );
@@ -158,15 +217,18 @@ app.post("/cliente", async (req, res) => {
 
 app.post("/login", async (req, res) => {
     try {
-        const { email, senha } = req.body;
+        const { email, senha } = req.body || {};
 
         if (!email || !senha) {
             return res.status(400).json({ erro: "Informe email e senha." });
         }
+        if (!process.env.JWT_SECRET) {
+            return res.status(500).json({ erro: "JWT_SECRET não configurado." });
+        }
 
         const [linhas] = await db.pool.query(
             "SELECT id, nome, email, senha FROM cliente WHERE email = ?",
-            [email]
+            [String(email).trim().toLowerCase()]
         );
 
         const dados_bd = linhas[0];
@@ -243,9 +305,17 @@ async function listarProdutos(req, res) {
             filtros.push(`p.preco <= ?`);
             params.push(precoMax);
         }
-        if (filtros.length > 0) {
-            sql += ` WHERE ` + filtros.join(` AND `);
+        const whereSql = filtros.length > 0 ? ` WHERE ${filtros.join(' AND ')}` : '';
+
+        if (whereSql) {
+            sql += whereSql;
         }
+
+        const [contagem] = await db.pool.query(
+            `SELECT COUNT(*) AS total FROM produto p JOIN loja l ON l.id = p.loja_id${whereSql}`,
+            params
+        );
+        const totalProdutos = Number(contagem[0].total);
 
         if (ordenar === 'menor_preco') {
             sql += ` ORDER BY p.preco ASC, p.id DESC`;
@@ -263,6 +333,9 @@ async function listarProdutos(req, res) {
             ...produto,
             imagem: `/produtos/${produto.id}/imagem`
         }));
+        res.set('X-Total-Count', String(totalProdutos));
+        res.set('X-Total-Pages', String(Math.max(1, Math.ceil(totalProdutos / PRODUTOS_POR_PAGINA))));
+        res.set('X-Pagina', String(pagina));
         res.status(200).json(produtos);
     } catch (error) {
         res.status(500).json({ erro: error.message });
@@ -271,6 +344,18 @@ async function listarProdutos(req, res) {
 
 app.get("/produtos", listarProdutos);
 app.get("/produto", listarProdutos);
+
+app.get("/categorias", async (req, res) => {
+    try {
+        const [linhas] = await db.pool.query(
+            `SELECT DISTINCT categoria FROM produto
+             WHERE categoria IS NOT NULL AND categoria <> '' ORDER BY categoria`
+        );
+        res.status(200).json(linhas.map((linha) => linha.categoria));
+    } catch (error) {
+        res.status(500).json({ erro: error.message });
+    }
+});
 
 app.get("/produtos/:id", async (req, res) => {
     try {
@@ -308,22 +393,35 @@ async function enviarImagemProduto(req, res) {
         }
 
         const [linhas] = await db.pool.query(
-            "SELECT imagem_url FROM produto WHERE id = ?",
+            "SELECT nome, imagem_url FROM produto WHERE id = ?",
             [id]
         );
 
-        if (linhas.length === 0 || !linhas[0].imagem_url) {
-            return res.status(404).json({ erro: "Produto sem imagem cadastrada." });
+        if (linhas.length === 0) {
+            return res.status(404).json({ erro: "Produto não encontrado." });
+        }
+
+        if (!linhas[0].imagem_url) {
+            res.set('Content-Type', 'image/svg+xml');
+            res.set('Cache-Control', 'public, max-age=60');
+            return res.status(200).send(imagemPadrao(linhas[0].nome));
         }
 
         const destino = urlImagemDireta(linhas[0].imagem_url);
-        const resposta = await buscarImagem(destino);
+        let resposta = await buscarImagem(destino);
+        let tipo = resposta.headers['content-type'] || '';
+
+        // O Drive pode devolver uma página de confirmação ( HTML ) antes da imagem.
+        if ((resposta.status < 200 || resposta.status >= 300 || !tipo.startsWith('image/'))
+            && idGoogleDrive(linhas[0].imagem_url)) {
+            resposta = await buscarImagem(urlComConfirmacao(destino));
+            tipo = resposta.headers['content-type'] || '';
+        }
 
         if (resposta.status < 200 || resposta.status >= 300) {
             return res.status(502).json({ erro: "Não foi possível carregar a imagem." });
         }
 
-        const tipo = resposta.headers['content-type'] || 'image/jpeg';
         if (!tipo.startsWith('image/')) {
             return res.status(502).json({ erro: "O endereço informado não retornou uma imagem." });
         }
@@ -394,11 +492,14 @@ app.put("/loja/minha", autenticar, async (req, res) => {
         const descricao = (req.body.descricao || '').trim();
         if (!nome) return res.status(400).json({ erro: "Informe o nome da loja." });
 
-        const [r] = await db.pool.query(
+        // affectedRows conta apenas linhas ALTERADAS; se os dados forem iguais ele é 0.
+        const [lojas] = await db.pool.query("SELECT id FROM loja WHERE cliente_id = ?", [req.usuario.id]);
+        if (lojas.length === 0) return res.status(404).json({ erro: "Você ainda não tem loja." });
+
+        await db.pool.query(
             "UPDATE loja SET nome = ?, descricao = ? WHERE cliente_id = ?",
             [nome, descricao || null, req.usuario.id]
         );
-        if (r.affectedRows === 0) return res.status(404).json({ erro: "Você ainda não tem loja." });
         res.status(200).json({ msg: "Loja atualizada!" });
     } catch (error) {
         res.status(500).json({ erro: error.message });
@@ -468,17 +569,16 @@ app.put("/loja/produtos/:id/imagem", autenticar, async (req, res) => {
             return res.status(400).json({ erro: "URL da imagem inválida." });
         }
 
-        const [r] = await db.pool.query(
-            `UPDATE produto p JOIN loja l ON l.id = p.loja_id
-             SET p.imagem_url = ?
+        const [produtos] = await db.pool.query(
+            `SELECT p.id FROM produto p JOIN loja l ON l.id = p.loja_id
              WHERE p.id = ? AND l.cliente_id = ?`,
-            [imagem_url, id, req.usuario.id]
+            [id, req.usuario.id]
         );
-
-        if (r.affectedRows === 0) {
+        if (produtos.length === 0) {
             return res.status(404).json({ erro: "Produto não encontrado na sua loja." });
         }
 
+        await db.pool.query("UPDATE produto SET imagem_url = ? WHERE id = ?", [imagem_url, id]);
         res.status(200).json({ msg: "Imagem atualizada!", imagem_url });
     } catch (error) {
         res.status(500).json({ erro: error.message });
@@ -487,14 +587,21 @@ app.put("/loja/produtos/:id/imagem", autenticar, async (req, res) => {
 
 app.delete("/loja/produtos/:id", autenticar, async (req, res) => {
     try {
-        const [r] = await db.pool.query(
-            `DELETE p FROM produto p JOIN loja l ON l.id = p.loja_id
+        const id = numeroInteiro(req.params.id);
+        if (!id || id <= 0) {
+            return res.status(400).json({ erro: "ID inválido." });
+        }
+
+        const [produtos] = await db.pool.query(
+            `SELECT p.id FROM produto p JOIN loja l ON l.id = p.loja_id
              WHERE p.id = ? AND l.cliente_id = ?`,
-            [req.params.id, req.usuario.id]
+            [id, req.usuario.id]
         );
-        if (r.affectedRows === 0) {
+        if (produtos.length === 0) {
             return res.status(404).json({ erro: "Produto não encontrado na sua loja." });
         }
+
+        await db.pool.query("DELETE FROM produto WHERE id = ?", [id]);
         res.status(200).json({ msg: "Produto removido!" });
     } catch (error) {
         if (error.code === 'ER_ROW_IS_REFERENCED_2') {
@@ -642,6 +749,7 @@ app.post("/compras", autenticar, async (req, res) => {
                 void rollbackError;
             }
         }
+        console.error('Erro ao registrar compra:', error);
         return res.status(500).json({ erro: "Não foi possível registrar a compra." });
     } finally {
         if (conexao) conexao.release();
@@ -709,6 +817,10 @@ app.get("/compras/:id", autenticar, (req, res) => {
     return consultarCompras(req, res, id);
 });
 
-app.listen(port, () => {
-    console.log(`API rodando na porta ${port}`);
-});
+if (require.main === module) {
+    app.listen(port, () => {
+        console.log(`API rodando na porta ${port}`);
+    });
+}
+
+module.exports = app;

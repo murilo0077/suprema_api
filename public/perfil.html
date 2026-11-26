@@ -39,6 +39,7 @@
     </div>
   </div>
 
+  <script src="api.js"></script>
   <script>
     function esc(s) {
       return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -49,7 +50,7 @@
       if (!token) { window.location.href = 'login.html'; return; }
 
       try {
-        const resposta = await fetch('/cliente/perfil', { headers: { 'Authorization': 'Bearer ' + token } });
+        const resposta = await fetch(API_BASE + '/cliente/perfil', { headers: { 'Authorization': 'Bearer ' + token } });
 
         if (resposta.status === 401 || resposta.status === 403) {
           localStorage.removeItem('token');
