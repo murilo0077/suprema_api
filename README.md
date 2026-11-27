@@ -72,7 +72,8 @@ Cabeçalhos: `X-Total-Count`, `X-Total-Pages`, `X-Pagina`.
 | `PUT` | `/loja/minha` | Atualiza loja | — |
 | `GET` | `/loja/produtos` | Produtos da loja | — |
 | `POST` | `/loja/produtos` | Cadastra produto | AV3 |
-| `PUT` | `/loja/produtos/:id/imagem` | Atualiza imagem | AV3 |
+| `POST` | `/loja/produtos/:id/imagem` | Envia arquivo de imagem (body = JPEG/PNG/GIF/WebP) | AV3 |
+| `PUT` | `/loja/produtos/:id/imagem` | Troca imagem por URL externa (Drive) | AV3 |
 | `DELETE` | `/loja/produtos/:id` | Remove produto | — |
 
 Exemplo de compra:
@@ -81,18 +82,51 @@ Exemplo de compra:
 curl -X POST http://localhost:3000/compras \
   -H "Authorization: Bearer SEU_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"itens":[{"produto_id":1,"quantidade":2},{"produto_id":2,"quantidade":1}]}'
+  -d '{"itens":[{"produto_id":1,"quantidade":2},{"produto_id":2,"quantidade":1}],"forma_pagamento":"PIX"}'
 ```
+
+`forma_pagamento` aceita `PIX`, `CARTAO` (cartão de crédito/débito) ou `BOLETO`; se omitido, usa `PIX`.
+É uma **simulação**: nenhum gateway de pagamento real é acionado. A forma escolhida é salva em `compra`
+e devolvida em `GET /compras`.
 
 Transação com `FOR UPDATE`, baixa de estoque e rollback em caso de erro. Sem token → `401`.
 
 ## Imagens
 
-Salvas fora do repositório (ex.: Google Drive). A API faz proxy em `/produtos/:id/imagem`; o front-end usa essa rota.
+As fotos ficam em `uploads/`, **fora do GitHub** (pasta no `.gitignore`). O front-end nunca aponta
+diretamente para o arquivo: ele usa `GET /produtos/:id/imagem`, e a API serve o arquivo local.
+Também é possível cadastrar uma URL do Google Drive em `imagem_url` — a API faz o proxy da mesma forma.
+
+```bash
+# enviar um arquivo para o produto 1 da loja do usuário logado
+curl -X POST http://localhost:3000/loja/produtos/1/imagem \
+  -H "Authorization: Bearer SEU_TOKEN" \
+  -H "Content-Type: image/jpeg" \
+  --data-binary @uploads/placa-video.jpg
+```
+
+`npm run seed` associa aos produtos as fotos de demonstração presentes em `uploads/`.
+Créditos e licenças: `CREDITOS-IMAGENS.md`.
 
 ## Front-end
 
-`index.html` (cadastro), `login.html`, `loja.html` (vitrine + filtros + carrinho LocalStorage + compra), `perfil.html`, `carrinho.js`, `endereco.js`.
+`index.html` (cadastro), `login.html`, `loja.html` (vitrine + filtros + carrinho LocalStorage + checkout com PIX/Cartão/Boleto + upload de imagem), `perfil.html`, `carrinho.js`, `endereco.js`.
+
+No checkout, o carrinho (salvo em `localStorage`) é enviado como lista de produtos para `POST /compras`
+junto com a forma de pagamento escolhida. O histórico em **Minhas compras** mostra a forma utilizada.
+Depois do login, a barra superior troca **Cadastrar-se/Entrar** pelo nome da conta (com link para o perfil e Sair).
+
+## Troubleshooting
+
+- **“Entre na sua conta” mesmo depois de logar:** a API agora também guarda a sessão em cookie `HttpOnly`,
+  então a loja reconhece o login mesmo que o `localStorage` esteja em outra origem/porta (ex.: login no Live Server
+  e loja na porta 3000). Se entrou em outra aba, basta voltar para a loja ou dar **F5**.
+  Ainda assim, prefira usar sempre o **mesmo endereço** (ex.: `http://localhost:3000` — não misture `127.0.0.1`,
+  `file://` e Live Server). Depois de atualizar o `index.js`, **reinicie o `npm start`** para carregar a rota de sessão.
+- **`NetworkError` / “Não foi possível conectar à API”:** a API não está rodando. Rode `npm start` e confirme
+  `http://localhost:3000/produtos` respondendo.
+- **`EADDRINUSE`:** já existe um `node index.js` na porta 3000. Rode `ss -ltnp | grep 3000`, encerre o PID antigo
+  com `kill <PID>` e inicie novamente.
 
 ## Scripts
 

@@ -6,41 +6,91 @@ const jwt = require('jsonwebtoken');
 const http = require('http');
 const https = require('https');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const db = require('./db');
 
 const app = express();
 const port = process.env.PORT || 3000;
 const PRODUTOS_POR_PAGINA = 10;
 const TAMANHO_MAXIMO_IMAGEM = 12 * 1024 * 1024; // 12 MB
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// Imagens ficam em uploads/ (fora do repositório), nunca em public/.
+const MIME_IMAGENS = Object.freeze({
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp'
+});
+const TIPOS_IMAGEM = Object.freeze({
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/gif': '.gif',
+    'image/webp': '.webp'
+});
+const FORMAS_PAGAMENTO = ['PIX', 'CARTAO', 'BOLETO'];
+const COOKIE_SESSAO = 'bf_sessao';
+const VALIDADE_TOKEN_MS = 60 * 60 * 1000; // 1 hora
 
 app.use(express.json());
-app.use(cors({ exposedHeaders: ['X-Total-Count', 'X-Total-Pages', 'X-Pagina'] }));
+app.use(cors({
+    origin: true,
+    credentials: true,
+    exposedHeaders: ['X-Total-Count', 'X-Total-Pages', 'X-Pagina']
+}));
 
 // A tela principal é a vitrine; cadastro e login continuam em /index.html e /login.html
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'loja.html')));
 app.use(express.static(path.join(__dirname, 'public')));
 
-function autenticar(req, res, next) {
+function tokenDoCookie(req) {
+    const cookie = String(req.headers.cookie || '');
+    const encontrado = cookie.match(new RegExp(`(?:^|;\\s*)${COOKIE_SESSAO}=([^;]+)`));
+    if (!encontrado) return null;
+    try {
+        return decodeURIComponent(encontrado[1]);
+    } catch (error) {
+        return encontrado[1];
+    }
+}
+
+function tokensDaRequisicao(req) {
+    const authHeader = String(req.headers['authorization'] || '');
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    // Cookie primeiro: funciona mesmo se o localStorage estiver em outra origem/porta.
+    return [tokenDoCookie(req), bearer].filter(Boolean);
+}
+
+function verificarToken(token) {
+    return new Promise((resolve) => {
+        jwt.verify(token, process.env.JWT_SECRET, (erro, usuario) => resolve(erro ? null : usuario));
+    });
+}
+
+async function autenticar(req, res, next) {
     if (!process.env.JWT_SECRET) {
         return res.status(500).json({ erro: "JWT_SECRET não configurado." });
     }
 
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-
-    if (!token) {
+    const tokens = tokensDaRequisicao(req);
+    if (tokens.length === 0) {
         return res.status(401).json({
-            erro: "Token não enviado, usar Authorization: Bearer <token>"
+            erro: "Token não enviado. Entre na conta ou use Authorization: Bearer <token>"
         });
     }
 
-    jwt.verify(token, process.env.JWT_SECRET, (err, usuario) => {
-        if (err) {
-            return res.status(403).json({ erro: "Token inválido ou expirado" });
+    for (const token of tokens) {
+        const usuario = await verificarToken(token);
+        if (usuario) {
+            req.usuario = usuario;
+            return next();
         }
-        req.usuario = usuario;
-        next();
-    });
+    }
+
+    return res.status(403).json({ erro: "Token inválido ou expirado. Entre novamente." });
 }
 
 function numeroInteiro(valor) {
@@ -94,6 +144,44 @@ function urlComConfirmacao(valor) {
     }
 }
 
+function normalizarFormaPagamento(valor) {
+    const texto = String(valor === undefined || valor === null ? 'PIX' : valor)
+        .trim()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[\s_-]/g, '');
+
+    if (!texto) return 'PIX';
+    if (['CARTAODECREDITO', 'CARTAODEDEBITO', 'CREDITO', 'DEBITO'].includes(texto)) {
+        return 'CARTAO';
+    }
+    return FORMAS_PAGAMENTO.includes(texto) ? texto : null;
+}
+
+function imagemValida(buffer, tipo) {
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) return false;
+
+    if (tipo === 'image/jpeg') {
+        return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+    }
+    if (tipo === 'image/png') {
+        return buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    }
+    if (tipo === 'image/gif') {
+        return ['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii'));
+    }
+    if (tipo === 'image/webp') {
+        return buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+            && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+    }
+    return false;
+}
+
+function caminhoImagemLocal(arquivo) {
+    // basename impede que um valor do banco acesse arquivos fora de uploads/.
+    return path.join(UPLOAD_DIR, path.basename(String(arquivo)));
+}
+
 function imagemPadrao(nome) {
     const texto = String(nome || 'Sem imagem')
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -107,6 +195,12 @@ function imagemPadrao(nome) {
   <text x="300" y="330" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#475569">${texto}</text>
 </svg>`;
     return Buffer.from(svg);
+}
+
+function enviarImagemPadrao(res, nome) {
+    res.set('Content-Type', 'image/svg+xml');
+    res.set('Cache-Control', 'public, max-age=60');
+    return res.status(200).send(imagemPadrao(nome));
 }
 
 function buscarImagem(url, redirecionamentos = 0) {
@@ -244,10 +338,43 @@ app.post("/login", async (req, res) => {
         const payload = { id: dados_bd.id, email: dados_bd.email };
         const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
 
+        // Cookie complementa o localStorage: a sessão sobrevive se a loja abrir em outra origem/porta.
+        res.cookie(COOKIE_SESSAO, token, {
+            httpOnly: true,
+            sameSite: 'lax',
+            maxAge: VALIDADE_TOKEN_MS,
+            path: '/'
+        });
+
         return res.status(200).json({ nome: dados_bd.nome, token: token });
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
+});
+
+// Consulta leve de sessão: usada pelo front para saber se está logado mesmo sem localStorage.
+app.get("/cliente/sessao", async (req, res) => {
+    if (!process.env.JWT_SECRET) {
+        return res.status(200).json({ autenticado: false });
+    }
+
+    for (const token of tokensDaRequisicao(req)) {
+        const usuario = await verificarToken(token);
+        if (usuario) {
+            const [linhas] = await db.pool.query("SELECT nome FROM cliente WHERE id = ?", [usuario.id]);
+            return res.status(200).json({
+                autenticado: true,
+                nome: linhas.length > 0 ? linhas[0].nome : null
+            });
+        }
+    }
+
+    return res.status(200).json({ autenticado: false });
+});
+
+app.post("/logout", (req, res) => {
+    res.clearCookie(COOKIE_SESSAO, { path: '/' });
+    res.status(200).json({ msg: "Sessão encerrada." });
 });
 
 app.get("/cliente/perfil", autenticar, async (req, res) => {
@@ -393,7 +520,7 @@ async function enviarImagemProduto(req, res) {
         }
 
         const [linhas] = await db.pool.query(
-            "SELECT nome, imagem_url FROM produto WHERE id = ?",
+            "SELECT nome, imagem_url, imagem_arquivo FROM produto WHERE id = ?",
             [id]
         );
 
@@ -401,36 +528,49 @@ async function enviarImagemProduto(req, res) {
             return res.status(404).json({ erro: "Produto não encontrado." });
         }
 
-        if (!linhas[0].imagem_url) {
-            res.set('Content-Type', 'image/svg+xml');
-            res.set('Cache-Control', 'public, max-age=60');
-            return res.status(200).send(imagemPadrao(linhas[0].nome));
+        const produto = linhas[0];
+
+        // Prioridade: arquivo salvo no servidor (upload). Depois, URL externa (ex.: Drive).
+        let imagemUrl = produto.imagem_url;
+        if (produto.imagem_arquivo) {
+            try {
+                const arquivo = caminhoImagemLocal(produto.imagem_arquivo);
+                const conteudo = await fs.promises.readFile(arquivo);
+                const extensao = path.extname(arquivo).toLowerCase();
+                res.set('Content-Type', MIME_IMAGENS[extensao] || 'application/octet-stream');
+                res.set('Cache-Control', 'public, max-age=300');
+                return res.status(200).send(conteudo);
+            } catch (error) {
+                // Arquivo removido: tenta a URL externa ou entrega a imagem padrão.
+                imagemUrl = null;
+            }
         }
 
-        const destino = urlImagemDireta(linhas[0].imagem_url);
+        if (!imagemUrl) {
+            return enviarImagemPadrao(res, produto.nome);
+        }
+
+        const destino = urlImagemDireta(imagemUrl);
         let resposta = await buscarImagem(destino);
         let tipo = resposta.headers['content-type'] || '';
 
         // O Drive pode devolver uma página de confirmação ( HTML ) antes da imagem.
         if ((resposta.status < 200 || resposta.status >= 300 || !tipo.startsWith('image/'))
-            && idGoogleDrive(linhas[0].imagem_url)) {
+            && idGoogleDrive(imagemUrl)) {
             resposta = await buscarImagem(urlComConfirmacao(destino));
             tipo = resposta.headers['content-type'] || '';
         }
 
-        if (resposta.status < 200 || resposta.status >= 300) {
-            return res.status(502).json({ erro: "Não foi possível carregar a imagem." });
-        }
-
-        if (!tipo.startsWith('image/')) {
-            return res.status(502).json({ erro: "O endereço informado não retornou uma imagem." });
+        // Link externo quebrado não deve deixar o catálogo sem imagem.
+        if (resposta.status < 200 || resposta.status >= 300 || !tipo.startsWith('image/')) {
+            return enviarImagemPadrao(res, produto.nome);
         }
 
         res.set('Content-Type', tipo);
         res.set('Cache-Control', 'public, max-age=300');
         res.status(200).send(resposta.body);
     } catch (error) {
-        res.status(502).json({ erro: "Não foi possível carregar a imagem." });
+        return enviarImagemPadrao(res, 'Sem imagem');
     }
 }
 
@@ -578,12 +718,70 @@ app.put("/loja/produtos/:id/imagem", autenticar, async (req, res) => {
             return res.status(404).json({ erro: "Produto não encontrado na sua loja." });
         }
 
-        await db.pool.query("UPDATE produto SET imagem_url = ? WHERE id = ?", [imagem_url, id]);
+        await db.pool.query(
+            "UPDATE produto SET imagem_url = ?, imagem_arquivo = NULL WHERE id = ?",
+            [imagem_url, id]
+        );
         res.status(200).json({ msg: "Imagem atualizada!", imagem_url });
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
 });
+
+// Upload binário: o arquivo fica em uploads/ (fora do Git) e é servido por /produtos/:id/imagem.
+app.post(
+    "/loja/produtos/:id/imagem",
+    autenticar,
+    express.raw({ type: Object.values(TIPOS_IMAGEM), limit: TAMANHO_MAXIMO_IMAGEM }),
+    async (req, res) => {
+        const id = numeroInteiro(req.params.id);
+        if (!id || id <= 0) {
+            return res.status(400).json({ erro: "ID inválido." });
+        }
+
+        const tipo = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+        const extensao = TIPOS_IMAGEM[tipo];
+        if (!extensao || !imagemValida(req.body, tipo)) {
+            return res.status(400).json({
+                erro: "Envie uma imagem JPEG, PNG, GIF ou WebP no corpo da requisição."
+            });
+        }
+
+        try {
+            const [produtos] = await db.pool.query(
+                `SELECT p.id FROM produto p JOIN loja l ON l.id = p.loja_id
+                 WHERE p.id = ? AND l.cliente_id = ?`,
+                [id, req.usuario.id]
+            );
+            if (produtos.length === 0) {
+                return res.status(404).json({ erro: "Produto não encontrado na sua loja." });
+            }
+
+            const nomeArquivo = crypto.randomBytes(12).toString('hex') + extensao;
+            const caminho = caminhoImagemLocal(nomeArquivo);
+            await fs.promises.writeFile(caminho, req.body);
+
+            try {
+                await db.pool.query(
+                    "UPDATE produto SET imagem_arquivo = ?, imagem_url = NULL WHERE id = ?",
+                    [nomeArquivo, id]
+                );
+            } catch (erroBanco) {
+                await fs.promises.unlink(caminho).catch(() => {});
+                throw erroBanco;
+            }
+
+            return res.status(200).json({
+                msg: "Imagem salva no servidor!",
+                arquivo: nomeArquivo,
+                imagem: `/produtos/${id}/imagem`
+            });
+        } catch (error) {
+            console.error('Erro ao salvar imagem:', error);
+            return res.status(500).json({ erro: "Não foi possível salvar a imagem." });
+        }
+    }
+);
 
 app.delete("/loja/produtos/:id", autenticar, async (req, res) => {
     try {
@@ -593,7 +791,7 @@ app.delete("/loja/produtos/:id", autenticar, async (req, res) => {
         }
 
         const [produtos] = await db.pool.query(
-            `SELECT p.id FROM produto p JOIN loja l ON l.id = p.loja_id
+            `SELECT p.id, p.imagem_arquivo FROM produto p JOIN loja l ON l.id = p.loja_id
              WHERE p.id = ? AND l.cliente_id = ?`,
             [id, req.usuario.id]
         );
@@ -602,6 +800,9 @@ app.delete("/loja/produtos/:id", autenticar, async (req, res) => {
         }
 
         await db.pool.query("DELETE FROM produto WHERE id = ?", [id]);
+        if (produtos[0].imagem_arquivo) {
+            await fs.promises.unlink(caminhoImagemLocal(produtos[0].imagem_arquivo)).catch(() => {});
+        }
         res.status(200).json({ msg: "Produto removido!" });
     } catch (error) {
         if (error.code === 'ER_ROW_IS_REFERENCED_2') {
@@ -668,6 +869,15 @@ app.post("/compras", autenticar, async (req, res) => {
         return res.status(400).json({ erro });
     }
 
+    const formaPagamento = normalizarFormaPagamento(
+        req.body && req.body.forma_pagamento !== undefined
+            ? req.body.forma_pagamento
+            : (req.body && req.body.pagamento)
+    );
+    if (!formaPagamento) {
+        return res.status(400).json({ erro: "Forma de pagamento inválida. Use PIX, CARTAO ou BOLETO." });
+    }
+
     let conexao = null;
 
     try {
@@ -714,8 +924,8 @@ app.post("/compras", autenticar, async (req, res) => {
         total = Number(total.toFixed(2));
 
         const [compra] = await conexao.query(
-            "INSERT INTO compra (cliente_id, total) VALUES (?, ?)",
-            [req.usuario.id, total]
+            "INSERT INTO compra (cliente_id, total, forma_pagamento) VALUES (?, ?, ?)",
+            [req.usuario.id, total, formaPagamento]
         );
 
         const compra_id = compra.insertId;
@@ -739,6 +949,8 @@ app.post("/compras", autenticar, async (req, res) => {
         return res.status(201).json({
             id: compra_id,
             total,
+            forma_pagamento: formaPagamento,
+            pagamento_simulado: true,
             itens
         });
     } catch (error) {
@@ -762,7 +974,7 @@ async function consultarCompras(req, res, compraId) {
         const filtro = compraId ? " AND c.id = ?" : "";
 
         const [linhas] = await db.pool.query(
-            `SELECT c.id AS compra_id, c.total, c.criado_em,
+            `SELECT c.id AS compra_id, c.total, c.criado_em, c.forma_pagamento,
                     ci.id AS item_id, ci.produto_id, ci.nome_produto,
                     ci.quantidade, ci.preco_unitario, ci.subtotal,
                     p.imagem_url
@@ -785,6 +997,7 @@ async function consultarCompras(req, res, compraId) {
                 compras.set(linha.compra_id, {
                     id: linha.compra_id,
                     total: Number(linha.total),
+                    forma_pagamento: linha.forma_pagamento || 'PIX',
                     criado_em: linha.criado_em,
                     itens: []
                 });
@@ -817,9 +1030,28 @@ app.get("/compras/:id", autenticar, (req, res) => {
     return consultarCompras(req, res, id);
 });
 
+// Erros do express.raw (upload) também viram JSON.
+app.use((erro, req, res, next) => {
+    if (erro.type === 'entity.too.large') {
+        return res.status(413).json({ erro: "Imagem muito grande. Limite: 12 MB." });
+    }
+    console.error('Erro na API:', erro);
+    return res.status(500).json({ erro: "Erro interno no servidor." });
+});
+
 if (require.main === module) {
-    app.listen(port, () => {
+    const servidor = app.listen(port, () => {
         console.log(`API rodando na porta ${port}`);
+    });
+
+    servidor.on('error', (erro) => {
+        if (erro.code === 'EADDRINUSE') {
+            console.error(`❌ A porta ${port} já está em uso.`);
+            console.error('   Rode: ss -ltnp | grep 3000  (ou lsof -i :3000) para ver o processo.');
+            console.error('   Encerre a instância antiga com: kill <PID> e rode npm start novamente.');
+            process.exit(1);
+        }
+        throw erro;
     });
 }
 

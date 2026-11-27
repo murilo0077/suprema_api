@@ -89,6 +89,14 @@ async function criarTabelas() {
             console.log("ℹ️ Coluna 'imagem_url' já existe na tabela 'produto'.");
         }
 
+        try {
+            await db.pool.query(`ALTER TABLE produto ADD COLUMN imagem_arquivo VARCHAR(255) NULL AFTER imagem_url`);
+            console.log("✅ Coluna 'imagem_arquivo' adicionada à tabela 'produto'!");
+        } catch (error) {
+            if (error.code !== 'ER_DUP_FIELDNAME') throw error;
+            console.log("ℹ️ Coluna 'imagem_arquivo' já existe na tabela 'produto'.");
+        }
+
         await db.pool.query(`ALTER TABLE produto MODIFY COLUMN imagem_url VARCHAR(2048) NULL`);
         await db.pool.query(`ALTER TABLE cliente MODIFY COLUMN celular VARCHAR(20) NOT NULL DEFAULT ''`);
         console.log("✅ Colunas existentes normalizadas!");
@@ -104,6 +112,14 @@ async function criarTabelas() {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
         `);
         console.log("✅ Tabela 'compra' criada com sucesso!");
+
+        try {
+            await db.pool.query(`ALTER TABLE compra ADD COLUMN forma_pagamento VARCHAR(20) NOT NULL DEFAULT 'PIX' AFTER total`);
+            console.log("✅ Coluna 'forma_pagamento' adicionada à tabela 'compra'!");
+        } catch (error) {
+            if (error.code !== 'ER_DUP_FIELDNAME') throw error;
+            console.log("ℹ️ Coluna 'forma_pagamento' já existe na tabela 'compra'.");
+        }
 
         await db.pool.query(`
             CREATE TABLE IF NOT EXISTS compra_item (

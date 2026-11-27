@@ -66,6 +66,7 @@
       try {
         const resposta = await fetch(API_BASE + '/login', {
           method: 'POST',
+          credentials: 'include', // guarda também a sessão em cookie na API
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, senha })
         });
@@ -84,7 +85,7 @@
         msg.className = 'msg ok';
         setTimeout(() => { window.location.href = destino; }, 800);
       } catch (error) {
-        msg.textContent = 'Erro de conexão com o servidor.';
+        msg.textContent = erroFetch(error);
         msg.className = 'msg erro';
       }
     }

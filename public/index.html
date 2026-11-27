@@ -284,7 +284,7 @@
         mostrarMsg('Cadastro realizado! Redirecionando para o login...', 'ok');
         setTimeout(() => { window.location.href = 'login.html'; }, 1200);
       } catch (error) {
-        mostrarMsg('Erro ao cadastrar: ' + error.message, 'erro');
+        mostrarMsg('Erro ao cadastrar: ' + erroFetch(error), 'erro');
       }
     }
   </script>

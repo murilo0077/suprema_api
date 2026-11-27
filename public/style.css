@@ -29,6 +29,7 @@ body{
 body.center{display:flex;align-items:center;justify-content:center;}
 a{color:var(--accent);text-decoration:none;font-weight:500;}
 a:hover{text-decoration:underline;}
+[hidden]{display:none !important;}
 
 /* ---------- layout: painel lateral + cartão ---------- */
 .shell{
@@ -121,6 +122,9 @@ form > .btn,.card > .btn,.card > a > .btn{margin-top:.8rem;}
 .toolbar select{flex:0 1 180px;width:auto;}
 .paginacao{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem;}
 .cart-badge{font-size:.8rem;font-weight:600;color:var(--accent);white-space:nowrap;}
+.conta{display:inline-flex;align-items:center;gap:.45rem;padding:.25rem .7rem .25rem .25rem;border:1px solid #bfdbfe;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:.82rem;font-weight:600;white-space:nowrap;}
+.conta:hover{text-decoration:none;background:#dbeafe;}
+.conta .avatar{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:.75rem;}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;}
 .produto{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.1rem;display:flex;flex-direction:column;gap:.35rem;}
 .produto h3{font-size:1rem;font-weight:600;}
@@ -147,6 +151,13 @@ form > .btn,.card > .btn,.card > a > .btn{margin-top:.8rem;}
 .carrinho-item .preco{font-size:.9rem;font-weight:600;text-align:right;}
 .carrinho-total{display:flex;justify-content:flex-end;gap:.4rem;margin:.9rem 0;font-size:1rem;}
 .carrinho-total strong{font-size:1.15rem;}
+.pagamento{border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:0 0 .9rem;display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;align-items:center;}
+.pagamento legend{padding:0 .35rem;font-size:.82rem;font-weight:600;color:var(--muted);}
+.pagamento-opcoes{display:flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer;margin:0;}
+.pagamento-opcoes input{width:auto;accent-color:var(--accent);cursor:pointer;}
+.pagamento-tag{background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;border-radius:999px;padding:.15rem .65rem;font-size:.75rem;font-weight:600;}
+.btn:disabled{opacity:.6;cursor:not-allowed;}
+input[type=file]{padding:.5rem;font-size:.85rem;}
 
 /* ---------- compras ---------- */
 .compra{border:1px solid var(--line);border-radius:10px;padding:1rem;margin-bottom:.9rem;background:var(--panel);}

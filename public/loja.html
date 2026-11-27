@@ -16,7 +16,10 @@
       <button class="tab active" data-tab="vitrine">Vitrine</button>
       <button class="tab logado" data-tab="minha">Minha loja</button>
       <button class="tab logado" data-tab="compras">Minhas compras</button>
-      <a class="logado" href="perfil.html"><button class="tab">Perfil</button></a>
+      <a class="conta logado" id="contaBox" href="perfil.html" hidden title="Abrir perfil">
+        <span class="avatar" id="avatarConta">?</span>
+        <span id="nomeConta">Minha conta</span>
+      </a>
       <a class="visitante" href="index.html"><button class="tab">Cadastrar-se</button></a>
       <a class="visitante" href="login.html?destino=loja.html"><button class="tab">Entrar</button></a>
       <button class="tab logado" onclick="sair()">Sair</button>
@@ -50,8 +53,20 @@
         </div>
         <div id="carrinhoItens"></div>
         <div class="carrinho-total">Total: <strong id="carrinhoTotal">R$ 0,00</strong></div>
+        <fieldset class="pagamento">
+          <legend>Forma de pagamento (simulação)</legend>
+          <label class="pagamento-opcoes">
+            <input type="radio" name="formaPagamento" value="PIX" checked> PIX
+          </label>
+          <label class="pagamento-opcoes">
+            <input type="radio" name="formaPagamento" value="CARTAO"> Cartão
+          </label>
+          <label class="pagamento-opcoes">
+            <input type="radio" name="formaPagamento" value="BOLETO"> Boleto
+          </label>
+        </fieldset>
         <div id="msgCompra" class="msg"></div>
-        <button class="btn btn-primary" type="button" onclick="finalizarCompra()">FINALIZAR COMPRA</button>
+        <button class="btn btn-primary" id="btnFinalizar" type="button" onclick="finalizarCompra()">FINALIZAR COMPRA</button>
       </div>
 
       <div id="listaProdutos" class="grid"></div>
@@ -99,7 +114,12 @@
               <input type="text" id="pCategoria" maxlength="60" placeholder="Ex: Hardware">
             </div>
             <div class="form-group">
-              <label for="pImagem">URL da imagem (Google Drive ou outro link público)</label>
+              <label for="pArquivo">Imagem do produto (salva no servidor)</label>
+              <input type="file" id="pArquivo" accept="image/jpeg,image/png,image/webp,image/gif">
+              <p class="hint inline">JPEG, PNG, WebP ou GIF até 12 MB. A imagem fica em <code>uploads/</code>, fora do GitHub.</p>
+            </div>
+            <div class="form-group">
+              <label for="pImagem">Ou use uma URL (Google Drive / outro link público)</label>
               <input type="url" id="pImagem" maxlength="2048" placeholder="https://drive.google.com/file/d/.../view">
             </div>
             <div class="row">
@@ -135,7 +155,8 @@
   <script src="api.js"></script>
   <script src="carrinho.js"></script>
   <script>
-    let token = localStorage.getItem('token');
+    let token = null;
+    let sessaoAtiva = false;
     let produtosVitrine = [];
     let paginaAtual = 1;
     let totalPaginas = 1;
@@ -145,32 +166,124 @@
     }
     const moeda = v => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-    function atualizarAuthUI() {
-      document.querySelectorAll('.logado').forEach(el => el.style.display = token ? '' : 'none');
-      document.querySelectorAll('.visitante').forEach(el => el.style.display = token ? 'none' : '');
+    // Sempre relê o localStorage: o login pode ter acontecido em outra aba.
+    function lerToken() {
+      token = localStorage.getItem('token');
+      return token;
     }
 
-    function exigirLogin() {
-      if (token) return true;
-      alert('Entre na sua conta para continuar. Seu carrinho foi salvo.');
+    function definirNomeConta(nome) {
+      if (!logado()) return;
+      const texto = String(nome || '').trim();
+      if (!texto || texto === 'Minha conta') return;
+      document.getElementById('nomeConta').textContent = texto;
+      document.getElementById('avatarConta').textContent = texto.charAt(0).toUpperCase();
+      if (localStorage.getItem('nomeUsuario') !== texto) {
+        localStorage.setItem('nomeUsuario', texto);
+      }
+    }
+
+    function logado() {
+      return !!(lerToken() || sessaoAtiva);
+    }
+
+    function atualizarAuthUI() {
+      const autenticado = logado();
+      document.querySelectorAll('.logado').forEach(el => { el.hidden = !autenticado; });
+      document.querySelectorAll('.visitante').forEach(el => { el.hidden = autenticado; });
+      if (autenticado) definirNomeConta(localStorage.getItem('nomeUsuario'));
+    }
+
+    // A API também guarda a sessão em cookie; isso cobre o caso do localStorage
+    // estar em outra origem/porta (ex.: login no Live Server e loja na porta 3000).
+    async function verificarSessao() {
+      try {
+        const r = await fetch(API_BASE + '/cliente/sessao', { credentials: 'include' });
+        const dados = await r.json().catch(() => ({}));
+        sessaoAtiva = !!dados.autenticado;
+        if (sessaoAtiva && dados.nome) definirNomeConta(dados.nome);
+        atualizarAuthUI();
+        return sessaoAtiva;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    // Se o nome não estiver salvo (token antigo), busca no perfil autenticado.
+    async function carregarNomeConta() {
+      if (!lerToken()) return;
+      const { ok, dados } = await api('/cliente/perfil');
+      if (ok) definirNomeConta(dados.nome);
+    }
+
+    // Confere o cookie antes de barrar a compra (pode levar alguns ms na 1ª carga).
+    async function garantirSessao() {
+      if (!logado()) await verificarSessao();
+      return logado();
+    }
+
+    async function exigirLogin() {
+      if (await garantirSessao()) return true;
+      const onde = location.origin === 'null' ? 'arquivo local (file://)' : location.origin;
+      alert('Entre na sua conta para continuar. Seu carrinho foi salvo.\n\n' +
+            'Se você já entrou em outra aba ou em outro endereço/porta, entre novamente aqui: ' + onde);
       window.location.href = 'login.html?destino=' + encodeURIComponent('loja.html');
       return false;
     }
 
+    function sincronizarAuth() {
+      lerToken();
+      verificarSessao().catch(() => {});
+      atualizarAuthUI();
+      carregarNomeConta().catch(() => {});
+    }
+
+    // Login em outra aba (storage) ou volta para esta aba (focus).
+    window.addEventListener('storage', (evento) => {
+      if (evento.key === 'token') sincronizarAuth();
+    });
+    window.addEventListener('focus', () => {
+      if (localStorage.getItem('token') !== token) sincronizarAuth();
+    });
+
     function sair() {
+      fetch(API_BASE + '/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
       localStorage.removeItem('token');
       localStorage.removeItem('nomeUsuario');
       token = null;
+      sessaoAtiva = false;
       atualizarAuthUI();
       window.location.href = 'loja.html';
     }
 
     async function api(url, opts = {}) {
+      lerToken();
+      const cabecalhos = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+      // Só envia Bearer se houver token válido no localStorage; se não houver,
+      // a autenticação usa o cookie da sessão.
+      if (token) cabecalhos.Authorization = 'Bearer ' + token;
       const r = await fetch(API_BASE + url, {
         ...opts,
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...(opts.headers || {}) }
+        credentials: 'include',
+        headers: cabecalhos
       });
-      if ((r.status === 401 || r.status === 403) && token) { sair(); throw new Error('Sessão expirada'); }
+      if ((r.status === 401 || r.status === 403) && logado()) { sair(); throw new Error('Sessão expirada'); }
+      const dados = await r.json().catch(() => ({}));
+      return { ok: r.ok, dados };
+    }
+
+    // Upload binário: o corpo é o arquivo, não JSON.
+    async function apiArquivo(url, arquivo) {
+      lerToken();
+      const cabecalhos = { 'Content-Type': arquivo.type || 'application/octet-stream' };
+      if (token) cabecalhos.Authorization = 'Bearer ' + token;
+      const r = await fetch(API_BASE + url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: cabecalhos,
+        body: arquivo
+      });
+      if ((r.status === 401 || r.status === 403) && logado()) { sair(); throw new Error('Sessão expirada'); }
       const dados = await r.json().catch(() => ({}));
       return { ok: r.ok, dados };
     }
@@ -182,8 +295,8 @@
 
     // ---------- abas ----------
     document.querySelectorAll('.tab[data-tab]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (btn.dataset.tab !== 'vitrine' && !exigirLogin()) return;
+      btn.addEventListener('click', async () => {
+        if (btn.dataset.tab !== 'vitrine' && !(await exigirLogin())) return;
         document.querySelectorAll('.tab[data-tab]').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
@@ -275,7 +388,7 @@
           </article>`).join('');
         renderPaginacao();
       } catch (e) {
-        lista.innerHTML = '<p class="vazio" style="grid-column:1/-1">Erro ao carregar produtos.</p>';
+        lista.innerHTML = `<p class="vazio" style="grid-column:1/-1">${esc(erroFetch(e))}</p>`;
       }
     }
 
@@ -344,29 +457,36 @@
 
     async function finalizarCompra() {
       const msg = document.getElementById('msgCompra');
+      const botao = document.getElementById('btnFinalizar');
       if (Carrinho.todos().length === 0) return mostrar(msg, 'Adicione produtos ao carrinho.', 'erro');
-      if (!exigirLogin()) return;
+      if (!(await exigirLogin())) return;
 
+      const selecionado = document.querySelector('input[name="formaPagamento"]:checked');
+      const formaPagamento = selecionado ? selecionado.value : 'PIX';
       const itens = Carrinho.todos().map(item => ({
         produto_id: item.id,
         quantidade: item.quantidade
       }));
 
+      botao.disabled = true;
       try {
         const { ok, dados } = await api('/compras', {
           method: 'POST',
-          body: JSON.stringify({ itens })
+          body: JSON.stringify({ itens, forma_pagamento: formaPagamento })
         });
 
         if (!ok) return mostrar(msg, dados.erro || 'Erro ao finalizar a compra.', 'erro');
 
-        mostrar(msg, 'Compra realizada com sucesso!', 'ok');
+        const nomePagamento = { PIX: 'PIX', CARTAO: 'cartão', BOLETO: 'boleto' }[dados.forma_pagamento] || formaPagamento;
+        mostrar(msg, `Compra realizada com sucesso! Pagamento via ${nomePagamento} (simulado).`, 'ok');
         Carrinho.limpar();
         renderCarrinho();
         carregarVitrine();
         carregarCompras();
       } catch (e) {
-        mostrar(msg, e.message, 'erro');
+        mostrar(msg, erroFetch(e), 'erro');
+      } finally {
+        botao.disabled = false;
       }
     }
 
@@ -436,7 +556,16 @@
         })
       });
       if (!ok) return mostrar(msg, dados.erro || 'Erro ao adicionar.', 'erro');
-      mostrar(msg, 'Produto adicionado!', 'ok');
+
+      const arquivo = document.getElementById('pArquivo').files[0];
+      if (arquivo) {
+        const envio = await apiArquivo(`/loja/produtos/${dados.id}/imagem`, arquivo);
+        if (!envio.ok) {
+          return mostrar(msg, 'Produto criado, mas a imagem falhou: ' + (envio.dados.erro || 'tente novamente.'), 'erro');
+        }
+      }
+
+      mostrar(msg, arquivo ? 'Produto e imagem adicionados!' : 'Produto adicionado!', 'ok');
       event.target.reset();
       document.getElementById('pEstoque').value = 1;
       carregarMeusProdutos();
@@ -466,6 +595,7 @@
         <div class="compra">
           <div class="compra-head">
             <strong>Compra #${compra.id}</strong>
+            <span class="pagamento-tag">${esc(compra.forma_pagamento || 'PIX')} · simulação</span>
             <span>${new Date(compra.criado_em).toLocaleString('pt-BR')}</span>
           </div>
           <div class="compra-itens">
@@ -484,6 +614,7 @@
     }
 
     atualizarAuthUI();
+    verificarSessao().then(() => carregarNomeConta()).catch(() => {});
     renderCarrinho();
     carregarFiltros();
     carregarVitrine();
